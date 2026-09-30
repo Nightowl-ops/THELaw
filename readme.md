@@ -315,5 +315,59 @@ every time the opposing counsel clicks the download link. a new row inserted int
 
 
 
+Roles and UserStatus
+
+Roles.java and UserStatus.java
+
+in our database schema a user cant just be anything .they must be one of four specific roles and there status active and inactive
+
+For the soft delete part we dont want to delete any user from the system because of missing record and name form the databse would cause problems
+
+so we inactivate it
+
+there logs remain in there but the user is incative
+solved the soft delete by the roles 
+
+
+Configurations File
+
+This is our master configuration file
+
+this contains settings common to all enviroments and tells spring which active profile to load
+
+1.)application.yml
+
+
+this is used to for running the application locally
+
+
+2.)application-dev.yml
+
+
+to check the working of the logic
+without touching our actual database correct.
+
+3.)application-test.yml
+
+
+
+login and verification
+
+JWT (JSON Web Token)
+
+lets think of JWT authentication like getting an entry card to an exclusive event.
+
+1.) login(show id): you present you email and password to the front desk
+which in our code is (/auth/users/login).
+
+2.) Verification & issuance : the desk confirms your identity against the database, stamps unforgettable ,tamper proof writsband with your identity and roles  JWT String
+
+3.) Subsequent Visits: you dont need to reverify each time you do a request you use you card to verify you dont need to reenter your password Authorization : Bearer,<token>
+
+4.) Door Security Check :we check the wristband no expired not tampered with if not 401 will appear
+
+
+
+
 
 
