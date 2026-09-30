@@ -1,0 +1,18 @@
+login and verification
+
+JWT (JSON Web Token)
+
+lets think of JWT authentication like getting an entry card to an exclusive event.
+
+1.) login(show id): you present you email and password to the front desk
+which in our code is (/auth/users/login).
+
+2.) Verification & issuance : the desk confirms your identity against the database, stamps unforgettable ,tamper proof writsband with your identity and roles  JWT String
+
+3.) Subsequent Visits: you dont need to reverify each time you do a request you use you card to verify you dont need to reenter your password Authorization : Bearer,<token>
+
+4.) Door Security Check :we check the wristband no expired not tampered with if not 401 will appear
+
+
+
+

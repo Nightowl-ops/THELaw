@@ -1,0 +1,14 @@
+Roles and UserStatus
+
+Roles.java and UserStatus.java
+
+ in our database schema a user cant just be anything .they must be one of four specific roles and there status active and inactive
+
+For the soft delete part we dont want to delete any user from the system because of missing record and name form the databse would cause problems
+
+so we inactivate it
+
+there logs remain in there but the user is incative
+solved the soft delete by the roles
+
+
