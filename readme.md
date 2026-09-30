@@ -1,6 +1,3 @@
-![img.png](img.png)
-
-
 Project 2:
 
 Digital Evidence Vault & Chain-of-Custody Managment System
@@ -271,7 +268,51 @@ example bookekd for analysis or booked for another thing in another day and so o
 
 
 
-5.)
+5.) Legal_cases --> exhibit binders
+
+one to many relationship
+
+one case can have multiple exhibits created for different hearings
+
+example : a single lawsuit might require a bail hearing  binder a motion to suppress binder and final trial binder
+all of these belong to the same case
+
+
+6.) exhibit_binder --> evidence_items via binder_exhibits
+
+FK binder_exhibits:
+
+binder_exhibits.binder_id --> exhibit_binders.id
+
+binder_exhibits.evidence_id --> evidence_items.id
+
+many_to_many
+
+why is it important it holds join table .it holds extra metadata specific
+
+
+7.) exhibit_binders--> discorvery_production
+
+FK
+
+binder_exhibits.binder_id --> exhibit_binders.id
+
+binder_exhibits.evidence_id --> evidence_items.id
+
+relationship one finalized binder can be packaged into one or more discovery production sent to externak parties.
+
+why it matters : when an attorny finalizes an exhibit binder, they create a production package it generates an expiring URL token for the opposing counsel to download those exhibits without giving them an internal login account
+
+
+8.) discovery_productions --> discovery_access_logs
+
+FK : discovery_access_logs.production_id --> discovery_profduction.id
+
+Relationship: one discovery production package can have multiple download events logged against it
+
+why it matters:
+every time the opposing counsel clicks the download link. a new row inserted into this table recording their IP address 
+
 
 
 
