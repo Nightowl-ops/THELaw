@@ -1,0 +1,6 @@
+MyUserDetails:-
+
+implements UserDetails : this is a magic word that tills
+Spring Security says i will only talk to objects that sign the userdetail
+what it does : we promise to answer all springboot security standared questions.
+

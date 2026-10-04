@@ -1,0 +1,16 @@
+The Request packege consists of three things
+
+first: RegisterRequest :- accept raw user input
+
+this is a simple data container representing the raw json body that a user sends when hitting POST /auth/register
+
+
+second:LoginRequest:- accepts credentials
+
+if a user wants to register he only needs his email and password
+
+third:AuthResponse :-packages the output token info clearly
+
+
+
+
