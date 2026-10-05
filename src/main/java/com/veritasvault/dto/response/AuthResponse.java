@@ -1,4 +1,4 @@
-package com.veritasvault.dto.request;
+package com.veritasvault.dto.response;
 
 import com.veritasvault.model.enums.Role;
 import lombok.*;
