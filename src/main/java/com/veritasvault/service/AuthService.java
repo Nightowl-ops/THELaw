@@ -1,13 +1,17 @@
 package com.veritasvault.service;
 
-import com.veritasvault.dto.request.AuthResponse;
 import com.veritasvault.dto.request.LoginRequest;
 import com.veritasvault.dto.request.RegisterRequest;
+import com.veritasvault.dto.response.AuthResponse;
+import com.veritasvault.exception.BadRequestException;
+import com.veritasvault.exception.ResourceNotFoundException;
 import com.veritasvault.model.User;
 import com.veritasvault.model.enums.UserStatus;
 import com.veritasvault.repository.UserRepository;
 import com.veritasvault.security.JwtUtils;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -18,6 +22,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+/*
+  Service orchestrating identity management, credential validation,
+  token issuance, and account lifecycle transitions.
+ */
 @Service
 public class AuthService {
 
@@ -39,34 +47,43 @@ public class AuthService {
         this.emailService = emailService;
     }
 
+    /**
+     * Registers a new user account with an unverified status.
+     * Generates a 24-hour verification token and initiates email dispatch.
+     *
+     * @param request User registration payload containing credentials and assigned role
+     * @return AuthResponse containing persisted user metadata without an active session token
+     * @throws BadRequestException if the provided email is already bound to an existing account
+     */
+    @Transactional
     public AuthResponse register(RegisterRequest request) {
-        // 1. Verify email uniqueness
+        // Enforce global email uniqueness before allocating credentials
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new IllegalArgumentException("Email is already in use: " + request.getEmail());
+            throw new BadRequestException("Email address is already registered: " + request.getEmail());
         }
 
-        // 2. Generate verification token and 24-hour expiration
+        // Generate an opaque, cryptographically random token for account activation
         String verificationToken = UUID.randomUUID().toString();
-        LocalDateTime expiry = LocalDateTime.now().plusHours(24);
+        LocalDateTime tokenExpiry = LocalDateTime.now().plusHours(24);
 
-        // 3. Persist user with isEmailVerified = false
+        // Accounts default to ACTIVE status but remain gated by isEmailVerified = false
         User user = User.builder()
-                .fullName(request.getFullName())
-                .email(request.getEmail())
+                .fullName(request.getFullName().trim())
+                .email(request.getEmail().toLowerCase().trim())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .role(request.getRole())
                 .status(UserStatus.ACTIVE)
                 .isEmailVerified(false)
                 .verificationToken(verificationToken)
-                .verificationTokenExpiry(expiry)
+                .verificationTokenExpiry(tokenExpiry)
                 .build();
 
         User savedUser = userRepository.save(user);
 
-        // 4. Send the verification email
+        // Dispatch verification link asynchronously to avoid blocking the client request thread
         emailService.sendVerificationEmail(savedUser.getEmail(), verificationToken);
 
-        // 5. Return AuthResponse without a token (token is null until email is verified)
+        // Security requirement: do not issue a Bearer token until email ownership is confirmed
         return AuthResponse.builder()
                 .token(null)
                 .tokenType(null)
@@ -77,36 +94,57 @@ public class AuthService {
                 .build();
     }
 
+    /**
+     * Validates a verification token and transitions the associated account to active/verified status.
+     *
+     * @param token Cryptographic UUID token supplied via email activation link
+     * @return Confirmation message upon successful verification
+     * @throws BadRequestException if the token does not exist or has exceeded its 24-hour lifetime
+     */
+    // transactional this rapes it all togeather so if an error happens halfway it roleback all of it so no problem might accour
+    // and incomplete data gets added to the table
     @Transactional
     public String verifyEmail(String token) {
         User user = userRepository.findByVerificationToken(token)
-                .orElseThrow(() -> new IllegalArgumentException("Invalid verification token"));
+                .orElseThrow(() -> new BadRequestException("Invalid or unrecognized verification token"));
 
+        // Enforce strict token expiration to mitigate link interception risks
         if (user.getVerificationTokenExpiry() != null && user.getVerificationTokenExpiry().isBefore(LocalDateTime.now())) {
-            throw new IllegalArgumentException("Verification token has expired. Please request a new one.");
+            throw new BadRequestException("Verification token has expired. Please request a new activation link.");
         }
 
-        // Activate user email verification
+        // Activate account and nullify single-use token fields to prevent replay
         user.setIsEmailVerified(true);
         user.setVerificationToken(null);
         user.setVerificationTokenExpiry(null);
         userRepository.save(user);
 
-        return "Email verified successfully! You can now log in.";
+        return "Email verified successfully! You may now log in to VeritasVault.";
     }
 
+    /**
+     * Authenticates user credentials via Spring Security and generates a signed JWT.
+     *
+     * @param request Login credentials (email and plaintext password)
+     * @return AuthResponse containing the user profile and signed Bearer JWT
+     * @throws DisabledException if the account has not verified its email address
+     * @throws BadCredentialsException if the email or password is invalid
+     */
     public AuthResponse login(LoginRequest request) {
-        // Authenticate user credentials via AuthenticationManager
-        // If isEmailVerified == false, MyUserDetails.isEnabled() returns false, throwing DisabledException
+        String normalizedEmail = request.getEmail().toLowerCase().trim();
+
+        // Delegate authentication to Spring Security DAO provider (handles BCrypt matching)
+        // If isEmailVerified == false or status == INACTIVE, MyUserDetails.isEnabled() triggers DisabledException
         Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
+                new UsernamePasswordAuthenticationToken(normalizedEmail, request.getPassword())
         );
 
         UserDetails userDetails = (UserDetails) authentication.getPrincipal();
 
         User user = userRepository.findByEmail(userDetails.getUsername())
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("User not found for authenticated principal"));
 
+        // Generate signed HMAC-SHA256 token encoding identity and role claims
         String token = jwtUtils.generateToken(userDetails);
 
         return AuthResponse.builder()

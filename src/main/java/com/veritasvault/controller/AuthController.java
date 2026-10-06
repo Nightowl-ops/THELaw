@@ -1,6 +1,6 @@
 package com.veritasvault.controller;
 
-import com.veritasvault.dto.request.AuthResponse;
+import com.veritasvault.dto.response.AuthResponse;
 import com.veritasvault.dto.request.LoginRequest;
 import com.veritasvault.dto.request.RegisterRequest;
 import com.veritasvault.service.AuthService;
