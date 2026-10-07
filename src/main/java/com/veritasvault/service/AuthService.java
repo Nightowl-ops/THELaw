@@ -47,13 +47,13 @@ public class AuthService {
         this.emailService = emailService;
     }
 
-    /**
-     * Registers a new user account with an unverified status.
-     * Generates a 24-hour verification token and initiates email dispatch.
-     *
-     * @param request User registration payload containing credentials and assigned role
-     * @return AuthResponse containing persisted user metadata without an active session token
-     * @throws BadRequestException if the provided email is already bound to an existing account
+    /*
+     Registers a new user account with an unverified status.
+      Generates a 24-hour verification token and initiates email dispatch.
+
+      @param request User registration payload containing credentials and assigned role
+      @return AuthResponse containing persisted user metadata without an active session token
+      @throws BadRequestException if the provided email is already bound to an existing account
      */
     @Transactional
     public AuthResponse register(RegisterRequest request) {
@@ -94,12 +94,12 @@ public class AuthService {
                 .build();
     }
 
-    /**
-     * Validates a verification token and transitions the associated account to active/verified status.
-     *
-     * @param token Cryptographic UUID token supplied via email activation link
-     * @return Confirmation message upon successful verification
-     * @throws BadRequestException if the token does not exist or has exceeded its 24-hour lifetime
+    /*
+      Validates a verification token and transitions the associated account to active/verified status.
+
+      @param token Cryptographic UUID token supplied via email activation link
+      @return Confirmation message upon successful verification
+      @throws BadRequestException if the token does not exist or has exceeded its 24-hour lifetime
      */
     // transactional this rapes it all togeather so if an error happens halfway it roleback all of it so no problem might accour
     // and incomplete data gets added to the table
@@ -122,13 +122,13 @@ public class AuthService {
         return "Email verified successfully! You may now log in to VeritasVault.";
     }
 
-    /**
-     * Authenticates user credentials via Spring Security and generates a signed JWT.
-     *
-     * @param request Login credentials (email and plaintext password)
-     * @return AuthResponse containing the user profile and signed Bearer JWT
-     * @throws DisabledException if the account has not verified its email address
-     * @throws BadCredentialsException if the email or password is invalid
+    /*
+      Authenticates user credentials via Spring Security and generates a signed JWT.
+
+      @param request Login credentials (email and plaintext password)
+      @return AuthResponse containing the user profile and signed Bearer JWT
+      @throws DisabledException if the account has not verified its email address
+      @throws BadCredentialsException if the email or password is invalid
      */
     public AuthResponse login(LoginRequest request) {
         String normalizedEmail = request.getEmail().toLowerCase().trim();

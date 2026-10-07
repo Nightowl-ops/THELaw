@@ -33,22 +33,28 @@ public class CustodyReservationService {
     private final UserRepository userRepository;
     private final ChainOfCustodyLogRepository custodyLogRepository;
 
-    // =========================================================================
-    // LOCATION 1: Add the notification field here at the top with other dependencies
-    // =========================================================================
-    private final NotificationService notificationService;
 
+    private final NotificationService notificationService;
+// this is used if an error occurs anywhere inside all the database modifications rollback take the validated input payload request ad the authentication user id examiner Id
     @Transactional
     public CustodyReservationResponse createReservation(CustodyReservationRequest request, Long examinerId) {
-        // 1. Time boundary validation
+
+        // 1. Time boundary validation it is used to check the end and start time
+        // this is used to make sure that the start time will not be the end time and the reverse
+        // two possiblilty one is the starting time start after the end time and the second is that both are equal
+
         if (request.getStartTime().isAfter(request.getEndTime()) || request.getStartTime().isEqual(request.getEndTime())) {
             throw new BadRequestException("Reservation start time must be strictly before end time");
         }
 
+        /// this is used to check that the checking time is before the current time which doesnt make sense
+
+
         if (request.getStartTime().isBefore(LocalDateTime.now())) {
             throw new BadRequestException("Cannot create a reservation for a date or time in the past");
         }
-        // 2. Fetch and validate Evidence Item
+
+        // 2. Fetch and validate Evidence Item does it exist or not
         EvidenceItem evidence = evidenceItemRepository.findById(request.getEvidenceItemId())
                 .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId()));
 
@@ -63,7 +69,7 @@ public class CustodyReservationService {
             throw new BadRequestException("Only users with ROLE_FORENSIC_EXAMINER or ROLE_ADMIN can reserve custody slots");
         }
 
-        // 4. Double-Booking Collision Check
+        // 4. Double-Booking Collision Check to check when a collistion
         List<ReservationStatus> blockingStatuses = List.of(ReservationStatus.CONFIRMED, ReservationStatus.ACTIVE);
         List<CustodyReservation> overlaps = reservationRepository.findOverlappingReservations(
                 evidence.getId(),
@@ -76,7 +82,7 @@ public class CustodyReservationService {
             throw new BadRequestException("Time conflict: Evidence item is already booked during the requested interval");
         }
 
-        // 5. Build and save CustodyReservation entity
+        // 5. Build and save CustodyReservation entity when nothings has been found as a conflict it will excute and this response will be shown to the user in the swagger
         CustodyReservation reservation = CustodyReservation.builder()
                 .evidenceItem(evidence)
                 .examiner(examiner)
@@ -93,9 +99,7 @@ public class CustodyReservationService {
 
         CustodyReservationResponse response = mapToResponse(savedReservation);
 
-        // =========================================================================
-        // LOCATION 2: Broadcast right before returning the response in createReservation
-        // =========================================================================
+
         notificationService.broadcast("CUSTODY_RESERVATION_CREATED", response);
 
         return response;
@@ -172,9 +176,7 @@ public class CustodyReservationService {
 
         CustodyReservationResponse response = mapToResponse(updated);
 
-        // =========================================================================
-        // LOCATION 3: Broadcast right before returning the response in checkOutEvidence
-        // =========================================================================
+
         notificationService.broadcast("EVIDENCE_CHECKED_OUT", response);
 
         return response;

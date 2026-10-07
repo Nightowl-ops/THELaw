@@ -1,0 +1,29 @@
+1. Lab Custody Reservation (Forensic Examiner)
+
+As a Forensic Examiner,
+I want to reserve a dedicated lab time slot for a piece of evidence,
+so that I can prevent double-booking and ensure no other examiner tampers with or analyzes the physical device at the same time.
+
+Acceptance Criteria:
+System checks existing bookings and rejects overlapping time slots with an error.
+System updates evidence status to RESERVED and logs the checkout when analysis begins.
+
+2. Trial Exhibit Binder & Bates Stamping (Attorney)
+
+As an Attorney,
+I want to bundle evidence items into an official Exhibit Binder with sequential Bates page numbers,
+so that all exhibits are clearly indexed and legally ready for presentation to the judge and jury.
+
+Acceptance Criteria:
+System calculates consecutive Bates numbers automatically (e.g., DEF-01-0001 to DEF-01-0020).
+Once the binder is finalized or served, the system locks it against any further modifications.
+
+3. Secure Discovery Production (Opposing Counsel Link)
+
+As an Attorney,
+I want to generate a secure, expiring download link for an exhibit binder,
+so that I can legally share discovery documents with opposing counsel without having to create an internal login account for them.
+
+Acceptance Criteria:
+External lawyer accesses the package using a high-entropy UUID token.
+System records their IP address and timestamp as legal Proof of Service.

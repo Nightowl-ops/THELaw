@@ -19,8 +19,8 @@ public class ChainOfCustodyService {
     private final ChainOfCustodyLogRepository custodyLogRepository;
     private final EvidenceItemRepository evidenceItemRepository;
 
-    /**
-     * Retrieves the complete, immutable chronological audit ledger for an evidence item.
+    /*
+      Retrieves the complete, immutable chronological audit ledger for an evidence item.
      */
     @Transactional(readOnly = true)
     public List<ChainOfCustodyResponse> getAuditTrailForEvidence(Long evidenceId) {

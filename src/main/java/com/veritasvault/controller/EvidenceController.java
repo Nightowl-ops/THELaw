@@ -5,6 +5,10 @@ import com.veritasvault.dto.response.EvidenceResponse;
 import com.veritasvault.model.enums.EvidenceStatus;
 import com.veritasvault.security.MyUserDetails;
 import com.veritasvault.service.EvidenceService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Encoding;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
@@ -31,6 +35,16 @@ public class EvidenceController {
      * and writes an initial INGEST custody entry.
      * Consumes multipart/form-data.
      */
+    @Operation(summary = "Uploads a new evidence item, computes SHA-256 fingerprint, and records initial INGEST custody record")
+    @RequestBody(
+            content = @Content(
+                    mediaType = MediaType.MULTIPART_FORM_DATA_VALUE,
+                    encoding = @Encoding(
+                            name = "data",
+                            contentType = MediaType.APPLICATION_JSON_VALUE
+                    )
+            )
+    )
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ROLE_ATTORNEY', 'ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
     public ResponseEntity<EvidenceResponse> uploadEvidence(
