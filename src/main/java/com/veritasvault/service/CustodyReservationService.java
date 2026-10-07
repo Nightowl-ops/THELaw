@@ -48,15 +48,13 @@ public class CustodyReservationService {
         if (request.getStartTime().isBefore(LocalDateTime.now())) {
             throw new BadRequestException("Cannot create a reservation for a date or time in the past");
         }
-
         // 2. Fetch and validate Evidence Item
         EvidenceItem evidence = evidenceItemRepository.findById(request.getEvidenceItemId())
                 .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId()));
 
-        if (evidence.getStatus() == EvidenceStatus.SEQUESTERED) {
-            throw new BadRequestException("Evidence item is currently SEQUESTERED due to an integrity flag and cannot be reserved");
+        if (evidence.getStatus() == EvidenceStatus.SEQUESTERED || evidence.getStatus() == EvidenceStatus.ADMITTED) {
+            throw new BadRequestException("Evidence item cannot be reserved: current status is " + evidence.getStatus());
         }
-
         // 3. Fetch and validate Examiner
         User examiner = userRepository.findById(examinerId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + examinerId));
