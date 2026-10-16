@@ -1,12 +1,14 @@
 package com.veritasvault.service;
 
 import com.veritasvault.dto.request.CreateDiscoveryRequest;
+import com.veritasvault.dto.response.DiscoveryReceiptResponse;
 import com.veritasvault.dto.response.DiscoveryResponse;
 import com.veritasvault.exception.BadRequestException;
 import com.veritasvault.exception.ResourceNotFoundException;
 import com.veritasvault.model.BinderExhibit;
 import com.veritasvault.model.DiscoveryAccessLog;
 import com.veritasvault.model.DiscoveryProduction;
+import com.veritasvault.model.EvidenceItem;
 import com.veritasvault.model.ExhibitBinder;
 import com.veritasvault.model.LegalCase;
 import com.veritasvault.model.User;
@@ -20,17 +22,22 @@ import com.veritasvault.repository.LegalCaseRepository;
 import com.veritasvault.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
  * Service managing external discovery production packages, time-limited token links,
- * and immutable access telemetry for legal Proof of Service.
+ * cryptographic token hashing, file streaming, and immutable access telemetry for legal Proof of Service.
  */
 @Service
 @RequiredArgsConstructor
@@ -42,13 +49,15 @@ public class DiscoveryProductionService {
     private final ExhibitBinderRepository exhibitBinderRepository;
     private final BinderExhibitRepository binderExhibitRepository;
     private final UserRepository userRepository;
+    private final FileStorageService fileStorageService;
 
     @Value("${app.server.base-url:http://localhost:8085}")
     private String baseUrl;
 
     /**
      * Creates a discovery production package tied to an exhibit binder and generates
-     * a secure, time-expiring external access token.
+     * a secure, time-expiring external access token. The database stores only the SHA-256
+     * hash of the token to prevent discovery hijacks during database leaks.
      */
     @Transactional
     public DiscoveryResponse createProduction(CreateDiscoveryRequest request, Long binderId, Long currentUserId) {
@@ -73,14 +82,16 @@ public class DiscoveryProductionService {
             throw new BadRequestException("Expiration date must be in the future");
         }
 
-        // Generate non-guessable secure token
-        String accessToken = UUID.randomUUID().toString();
+        // Generate non-guessable high-entropy token
+        String rawAccessToken = UUID.randomUUID().toString();
+        String tokenHash = hashToken(rawAccessToken);
 
         DiscoveryProduction production = DiscoveryProduction.builder()
                 .legalCase(legalCase)
                 .binder(binder)
                 .targetPartyName(request.getRecipientParty().trim())
-                .accessToken(accessToken)
+                .accessToken(rawAccessToken)
+                .accessTokenHash(tokenHash)
                 .isWatermarked(true)
                 .expiresAt(request.getExpiresAt())
                 .createdBy(creator)
@@ -92,7 +103,7 @@ public class DiscoveryProductionService {
         binder.setStatus(BinderStatus.SERVED);
         exhibitBinderRepository.save(binder);
 
-        return mapToResponse(saved);
+        return mapToResponse(saved, rawAccessToken);
     }
 
     /**
@@ -100,16 +111,13 @@ public class DiscoveryProductionService {
      * Records access telemetry (IP and User-Agent) as courtroom Proof of Service.
      */
     @Transactional
-    public DiscoveryResponse accessProductionByToken(String accessToken, String ipAddress, String userAgent) {
-        DiscoveryProduction production = discoveryProductionRepository.findByAccessToken(accessToken)
-                .orElseThrow(() -> new ResourceNotFoundException("Invalid or unrecognized discovery access token"));
+    public DiscoveryResponse accessProductionByToken(String rawAccessToken, String ipAddress, String userAgent) {
+        DiscoveryProduction production = findByRawToken(rawAccessToken);
 
-        // Validate expiration
         if (LocalDateTime.now().isAfter(production.getExpiresAt())) {
             throw new BadRequestException("This discovery package link has expired");
         }
 
-        // Log access audit trail
         DiscoveryAccessLog log = DiscoveryAccessLog.builder()
                 .production(production)
                 .ipAddress(ipAddress != null ? ipAddress : "UNKNOWN")
@@ -119,14 +127,49 @@ public class DiscoveryProductionService {
 
         discoveryAccessLogRepository.save(log);
 
-        return mapToResponse(production);
+        return mapToResponse(production, rawAccessToken);
+    }
+
+    /**
+     * Streams the discovery exhibit bundle for external counsel using the expiring token.
+     * Records telemetry in DiscoveryAccessLog.
+     */
+    @Transactional
+    public DownloadBundle loadProductionBundle(String rawAccessToken, String ipAddress, String userAgent) {
+        DiscoveryProduction production = findByRawToken(rawAccessToken);
+
+        if (LocalDateTime.now().isAfter(production.getExpiresAt())) {
+            throw new BadRequestException("This discovery package link has expired");
+        }
+
+        List<BinderExhibit> exhibits = binderExhibitRepository
+                .findByBinderIdOrderByBatesStartNumAsc(production.getBinder().getId());
+
+        if (exhibits.isEmpty()) {
+            throw new ResourceNotFoundException("No exhibits attached to this discovery binder");
+        }
+
+        EvidenceItem primaryEvidence = exhibits.get(0).getEvidenceItem();
+        Resource resource = fileStorageService.loadAsResource(primaryEvidence.getStorageUrl());
+        String fileName = production.getBinder().getBinderName() + "-discovery-exhibit.bin";
+
+        DiscoveryAccessLog log = DiscoveryAccessLog.builder()
+                .production(production)
+                .ipAddress(ipAddress != null ? ipAddress : "UNKNOWN")
+                .userAgent(userAgent != null ? userAgent : "UNKNOWN")
+                .downloadedFileName(fileName)
+                .build();
+
+        discoveryAccessLogRepository.save(log);
+
+        return new DownloadBundle(resource, fileName);
     }
 
     @Transactional(readOnly = true)
     public DiscoveryResponse getProductionById(Long id) {
         DiscoveryProduction production = discoveryProductionRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Discovery production not found with ID: " + id));
-        return mapToResponse(production);
+        return mapToResponse(production, production.getAccessToken());
     }
 
     @Transactional(readOnly = true)
@@ -136,17 +179,54 @@ public class DiscoveryProductionService {
         }
         return discoveryProductionRepository.findByLegalCaseId(caseId)
                 .stream()
-                .map(this::mapToResponse)
+                .map(prod -> mapToResponse(prod, prod.getAccessToken()))
                 .collect(Collectors.toList());
     }
 
-    // --- Helper Mapping Methods ---
+    /**
+     * Retrieves all external access logs for a production as legal Proof of Service.
+     */
+    @Transactional(readOnly = true)
+    public List<DiscoveryReceiptResponse> getReceipts(Long productionId) {
+        if (!discoveryProductionRepository.existsById(productionId)) {
+            throw new ResourceNotFoundException("Discovery production not found with ID: " + productionId);
+        }
 
-    private DiscoveryResponse mapToResponse(DiscoveryProduction production) {
-        String downloadUrl = baseUrl + "/api/discovery/download/" + production.getAccessToken();
+        return discoveryAccessLogRepository.findByProductionIdOrderByAccessedAtDesc(productionId)
+                .stream()
+                .map(log -> DiscoveryReceiptResponse.builder()
+                        .id(log.getId())
+                        .productionId(log.getProduction().getId())
+                        .ipAddress(log.getIpAddress())
+                        .userAgent(log.getUserAgent())
+                        .downloadedFileName(log.getDownloadedFileName())
+                        .accessedAt(log.getAccessedAt())
+                        .build())
+                .collect(Collectors.toList());
+    }
 
-        List<BinderExhibit> exhibits = binderExhibitRepository
-                .findByBinderIdOrderByBatesStartNumAsc(production.getBinder().getId());
+    // --- Helper Token Hashing & Mapping Methods ---
+
+    private DiscoveryProduction findByRawToken(String rawToken) {
+        String tokenHash = hashToken(rawToken);
+        return discoveryProductionRepository.findByAccessTokenHash(tokenHash)
+                .or(() -> discoveryProductionRepository.findByAccessToken(rawToken))
+                .orElseThrow(() -> new ResourceNotFoundException("Invalid or unrecognized discovery access token"));
+    }
+
+    public static String hashToken(String rawToken) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hashBytes);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 algorithm not available on this JVM", e);
+        }
+    }
+
+    private DiscoveryResponse mapToResponse(DiscoveryProduction production, String displayToken) {
+        String tokenToUse = (displayToken != null) ? displayToken : production.getAccessToken();
+        String downloadUrl = baseUrl + "/api/discovery/download/" + tokenToUse;
 
         int totalDownloads = discoveryAccessLogRepository
                 .findByProductionIdOrderByAccessedAtDesc(production.getId())
@@ -158,7 +238,7 @@ public class DiscoveryProductionService {
                 .caseNumber(production.getLegalCase().getCaseNumber())
                 .title(production.getBinder().getBinderName())
                 .description("Discovery bundle served to " + production.getTargetPartyName())
-                .accessToken(production.getAccessToken())
+                .accessToken(tokenToUse)
                 .downloadUrl(downloadUrl)
                 .recipientParty(production.getTargetPartyName())
                 .expiresAt(production.getExpiresAt())
@@ -169,4 +249,6 @@ public class DiscoveryProductionService {
                 .createdAt(production.getCreatedAt())
                 .build();
     }
+
+    public record DownloadBundle(Resource resource, String fileName) {}
 }

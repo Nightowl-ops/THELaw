@@ -7,8 +7,15 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Spring Data JPA repository for DiscoveryProduction entities.
+ */
 @Repository
 public interface DiscoveryProductionRepository extends JpaRepository<DiscoveryProduction, Long> {
+
     Optional<DiscoveryProduction> findByAccessToken(String accessToken);
+
+    Optional<DiscoveryProduction> findByAccessTokenHash(String accessTokenHash);
+
     List<DiscoveryProduction> findByLegalCaseId(Long caseId);
 }

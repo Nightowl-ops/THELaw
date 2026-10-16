@@ -3,20 +3,29 @@ package com.veritasvault.service;
 import com.veritasvault.dto.request.CreateCaseRequest;
 import com.veritasvault.dto.response.CaseResponse;
 import com.veritasvault.exception.BadRequestException;
+import com.veritasvault.exception.ConflictException;
 import com.veritasvault.exception.ResourceNotFoundException;
 import com.veritasvault.model.LegalCase;
 import com.veritasvault.model.User;
 import com.veritasvault.model.enums.CaseStatus;
+import com.veritasvault.model.enums.CaseType;
 import com.veritasvault.model.enums.Role;
 import com.veritasvault.repository.LegalCaseRepository;
 import com.veritasvault.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Service orchestrating legal case creation, assignment validation,
+ * access control enforcement, and lifecycle state management.
+ */
 @Service
 @RequiredArgsConstructor
 public class LegalCaseService {
@@ -24,14 +33,17 @@ public class LegalCaseService {
     private final LegalCaseRepository legalCaseRepository;
     private final UserRepository userRepository;
 
+    /**
+     * Creates and registers a new legal proceeding case file.
+     * Enforces unique case numbering (throwing 409 Conflict if duplicate)
+     * and attorney credential verification.
+     */
     @Transactional
     public CaseResponse createCase(CreateCaseRequest request) {
-        // 1. Guard against duplicate case numbers
         if (legalCaseRepository.existsByCaseNumber(request.getCaseNumber())) {
-            throw new BadRequestException("Case number '" + request.getCaseNumber() + "' already exists");
+            throw new ConflictException("Case number '" + request.getCaseNumber() + "' already exists");
         }
 
-        // 2. Validate Lead Attorney existence & role
         User attorney = userRepository.findById(request.getLeadAttorneyId())
                 .orElseThrow(() -> new ResourceNotFoundException("Lead attorney not found with ID: " + request.getLeadAttorneyId()));
 
@@ -39,7 +51,6 @@ public class LegalCaseService {
             throw new BadRequestException("User ID " + request.getLeadAttorneyId() + " must have ROLE_ATTORNEY or ROLE_ADMIN");
         }
 
-        // 3. Validate Client existence & role (optional field)
         User client = null;
         if (request.getClientId() != null) {
             client = userRepository.findById(request.getClientId())
@@ -50,7 +61,6 @@ public class LegalCaseService {
             }
         }
 
-        // 4. Construct and persist LegalCase
         LegalCase legalCase = LegalCase.builder()
                 .caseNumber(request.getCaseNumber())
                 .caseTitle(request.getCaseTitle())
@@ -67,11 +77,47 @@ public class LegalCaseService {
         return mapToResponse(saved);
     }
 
+    /**
+     * Retrieves a single case dossier by ID with strict ownership validation.
+     * Clients can only access their own assigned cases.
+     */
+    @Transactional(readOnly = true)
+    public CaseResponse getCaseById(Long id, User currentUser) {
+        LegalCase legalCase = legalCaseRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Legal case not found with ID: " + id));
+
+        // Ownership enforcement for clients
+        if (currentUser.getRole() == Role.ROLE_CLIENT) {
+            if (legalCase.getClient() == null || !legalCase.getClient().getId().equals(currentUser.getId())) {
+                throw new AccessDeniedException("Access denied: You do not have permission to view this legal case");
+            }
+        }
+
+        return mapToResponse(legalCase);
+    }
+
     @Transactional(readOnly = true)
     public CaseResponse getCaseById(Long id) {
         LegalCase legalCase = legalCaseRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Legal case not found with ID: " + id));
         return mapToResponse(legalCase);
+    }
+
+    /**
+     * Retrieves paginated cases with filtering.
+     * Automatically constrains client queries to their owned records.
+     */
+    @Transactional(readOnly = true)
+    public Page<CaseResponse> getCases(CaseStatus status, CaseType type, String search, User currentUser, Pageable pageable) {
+        String query = (search != null && !search.isBlank()) ? search.trim() : null;
+
+        if (currentUser != null && currentUser.getRole() == Role.ROLE_CLIENT) {
+            return legalCaseRepository.searchCasesByClient(currentUser.getId(), status, type, query, pageable)
+                    .map(this::mapToResponse);
+        }
+
+        return legalCaseRepository.searchCases(status, type, query, pageable)
+                .map(this::mapToResponse);
     }
 
     @Transactional(readOnly = true)
@@ -88,6 +134,19 @@ public class LegalCaseService {
                 .stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Updates case lifecycle status (e.g. ACTIVE -> PENDING_TRIAL -> SETTLED -> ARCHIVED).
+     */
+    @Transactional
+    public CaseResponse updateCaseStatus(Long id, CaseStatus newStatus) {
+        LegalCase legalCase = legalCaseRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Legal case not found with ID: " + id));
+
+        legalCase.setStatus(newStatus);
+        LegalCase updated = legalCaseRepository.save(legalCase);
+        return mapToResponse(updated);
     }
 
     private CaseResponse mapToResponse(LegalCase legalCase) {

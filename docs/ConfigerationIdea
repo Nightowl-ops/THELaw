@@ -1,0 +1,22 @@
+Configurations File
+
+This is our master configuration file
+
+this contains settings common to all enviroments and tells spring which active profile to load
+
+1.)application.yml
+
+
+this is used to for running the application locally
+
+
+2.)application-dev.yml
+
+
+to check the working of the logic
+without touching our actual database correct.
+
+3.)application-test.yml
+
+
+

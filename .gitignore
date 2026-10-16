@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### VeritasVault Runtime Directories ###
+uploads/
+docs_notes.txt

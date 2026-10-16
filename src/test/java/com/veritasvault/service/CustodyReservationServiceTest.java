@@ -3,6 +3,8 @@ package com.veritasvault.service;
 import com.veritasvault.dto.request.CustodyReservationRequest;
 import com.veritasvault.dto.response.CustodyReservationResponse;
 import com.veritasvault.exception.BadRequestException;
+import com.veritasvault.exception.ConflictException;
+import org.springframework.security.access.AccessDeniedException;
 import com.veritasvault.model.CustodyReservation;
 import com.veritasvault.model.EvidenceItem;
 import com.veritasvault.model.User;
@@ -85,7 +87,7 @@ class CustodyReservationServiceTest {
                 .notes("Standard analysis")
                 .build();
 
-        when(evidenceItemRepository.findById(100L)).thenReturn(Optional.of(evidence));
+        when(evidenceItemRepository.findByIdWithPessimisticLock(100L)).thenReturn(Optional.of(evidence));
         when(userRepository.findById(10L)).thenReturn(Optional.of(examiner));
         when(reservationRepository.findOverlappingReservations(eq(100L), eq(futureStart), eq(futureEnd), any()))
                 .thenReturn(Collections.emptyList());
@@ -114,7 +116,7 @@ class CustodyReservationServiceTest {
     }
 
     @Test
-    @DisplayName("Should throw BadRequestException when booking conflicts with an existing active reservation")
+    @DisplayName("Should throw ConflictException (409) when booking conflicts with an existing active reservation")
     void createReservation_CollisionDetected_ThrowsException() {
         CustodyReservationRequest request = CustodyReservationRequest.builder()
                 .evidenceItemId(100L)
@@ -122,7 +124,7 @@ class CustodyReservationServiceTest {
                 .endTime(futureEnd)
                 .build();
 
-        when(evidenceItemRepository.findById(100L)).thenReturn(Optional.of(evidence));
+        when(evidenceItemRepository.findByIdWithPessimisticLock(100L)).thenReturn(Optional.of(evidence));
         when(userRepository.findById(10L)).thenReturn(Optional.of(examiner));
 
         CustodyReservation conflicting = CustodyReservation.builder()
@@ -134,7 +136,7 @@ class CustodyReservationServiceTest {
                 .thenReturn(List.of(conflicting));
 
         assertThatThrownBy(() -> reservationService.createReservation(request, 10L))
-                .isInstanceOf(BadRequestException.class)
+                .isInstanceOf(ConflictException.class)
                 .hasMessageContaining("Time conflict");
 
         verify(reservationRepository, never()).save(any());
@@ -151,7 +153,7 @@ class CustodyReservationServiceTest {
                 .endTime(futureEnd)
                 .build();
 
-        when(evidenceItemRepository.findById(100L)).thenReturn(Optional.of(evidence));
+        when(evidenceItemRepository.findByIdWithPessimisticLock(100L)).thenReturn(Optional.of(evidence));
 
         assertThatThrownBy(() -> reservationService.createReservation(request, 10L))
                 .isInstanceOf(BadRequestException.class)
@@ -182,5 +184,113 @@ class CustodyReservationServiceTest {
                         log.getEvidenceItem().getId().equals(100L)
         ));
         verify(notificationService, times(1)).broadcast(eq("EVIDENCE_CHECKED_OUT"), any());
+    }
+
+    @Test
+    @DisplayName("Should deny checkout when examiner does not own the reservation")
+    void checkOutEvidence_UnassignedExaminer_ThrowsAccessDenied() {
+        User anotherExaminer = User.builder()
+                .id(20L)
+                .fullName("Dr. Jekyll")
+                .role(Role.ROLE_FORENSIC_EXAMINER)
+                .build();
+
+        CustodyReservation reservation = CustodyReservation.builder()
+                .id(200L)
+                .evidenceItem(evidence)
+                .examiner(examiner) // Owned by ID 10L
+                .status(ReservationStatus.CONFIRMED)
+                .build();
+
+        when(reservationRepository.findById(200L)).thenReturn(Optional.of(reservation));
+        when(userRepository.findById(20L)).thenReturn(Optional.of(anotherExaminer));
+
+        assertThatThrownBy(() -> reservationService.checkOutEvidence(200L, 20L))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("Access denied");
+
+        verify(custodyLogRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Should cancel reservation, release evidence back to AVAILABLE, and log custody event")
+    void cancelReservation_Success() {
+        evidence.setStatus(EvidenceStatus.RESERVED);
+        CustodyReservation reservation = CustodyReservation.builder()
+                .id(300L)
+                .evidenceItem(evidence)
+                .examiner(examiner)
+                .status(ReservationStatus.CONFIRMED)
+                .build();
+
+        when(reservationRepository.findById(300L)).thenReturn(Optional.of(reservation));
+        when(userRepository.findById(10L)).thenReturn(Optional.of(examiner));
+        when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CustodyReservationResponse response = reservationService.cancelReservation(300L, 10L);
+
+        assertThat(response.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
+        assertThat(evidence.getStatus()).isEqualTo(EvidenceStatus.AVAILABLE);
+
+        verify(evidenceItemRepository, times(1)).save(evidence);
+        verify(custodyLogRepository, times(1)).save(argThat(log ->
+                log.getActionType() == CustodyActionType.CHECK_IN &&
+                        log.getNotes().contains("cancelled")
+        ));
+        verify(notificationService, times(1)).broadcast(eq("CUSTODY_RESERVATION_CANCELLED"), any());
+    }
+
+    @Test
+    @DisplayName("Should deny cancellation when examiner does not own the reservation")
+    void cancelReservation_UnassignedExaminer_ThrowsAccessDenied() {
+        User unauthorizedUser = User.builder()
+                .id(99L)
+                .fullName("Unauthorized Attorney")
+                .role(Role.ROLE_ATTORNEY)
+                .build();
+
+        CustodyReservation reservation = CustodyReservation.builder()
+                .id(300L)
+                .evidenceItem(evidence)
+                .examiner(examiner) // ID 10L
+                .status(ReservationStatus.CONFIRMED)
+                .build();
+
+        when(reservationRepository.findById(300L)).thenReturn(Optional.of(reservation));
+        when(userRepository.findById(99L)).thenReturn(Optional.of(unauthorizedUser));
+
+        assertThatThrownBy(() -> reservationService.cancelReservation(300L, 99L))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("Access denied");
+
+        verify(reservationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Should check in evidence: mark reservation COMPLETED, evidence AVAILABLE, and log check-in")
+    void checkInEvidence_Success() {
+        evidence.setStatus(EvidenceStatus.IN_LAB);
+        CustodyReservation reservation = CustodyReservation.builder()
+                .id(400L)
+                .evidenceItem(evidence)
+                .examiner(examiner)
+                .status(ReservationStatus.ACTIVE)
+                .build();
+
+        when(reservationRepository.findById(400L)).thenReturn(Optional.of(reservation));
+        when(userRepository.findById(10L)).thenReturn(Optional.of(examiner));
+        when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CustodyReservationResponse response = reservationService.checkInEvidence(400L, "Analysis completed cleanly", 10L);
+
+        assertThat(response.getStatus()).isEqualTo(ReservationStatus.COMPLETED);
+        assertThat(evidence.getStatus()).isEqualTo(EvidenceStatus.AVAILABLE);
+
+        verify(evidenceItemRepository, times(1)).save(evidence);
+        verify(custodyLogRepository, times(1)).save(argThat(log ->
+                log.getActionType() == CustodyActionType.CHECK_IN &&
+                        log.getEvidenceItem().getId().equals(100L)
+        ));
+        verify(notificationService, times(1)).broadcast(eq("EVIDENCE_CHECKED_IN"), any());
     }
 }

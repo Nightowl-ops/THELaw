@@ -6,6 +6,10 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
+/**
+ * Entity representing an outbound legal discovery package disclosure served to opposing counsel.
+ * Features time-limited cryptographic token access, optional password gating, and access telemetry.
+ */
 @Entity
 @Table(name = "discovery_productions")
 @Getter
@@ -30,8 +34,11 @@ public class DiscoveryProduction {
     @Column(name = "target_party_name", nullable = false)
     private String targetPartyName;
 
-    @Column(name = "access_token", nullable = false, unique = true)
+    @Column(name = "access_token")
     private String accessToken;
+
+    @Column(name = "access_token_hash", nullable = false, unique = true)
+    private String accessTokenHash;
 
     @Column(name = "download_password_hash")
     private String downloadPasswordHash;

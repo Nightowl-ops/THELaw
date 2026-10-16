@@ -10,6 +10,7 @@ import com.veritasvault.model.LegalCase;
 import com.veritasvault.model.User;
 import com.veritasvault.model.enums.CustodyActionType;
 import com.veritasvault.model.enums.EvidenceStatus;
+import com.veritasvault.model.enums.EvidenceType;
 import com.veritasvault.repository.ChainOfCustodyLogRepository;
 import com.veritasvault.repository.EvidenceItemRepository;
 import com.veritasvault.repository.LegalCaseRepository;
@@ -17,19 +18,20 @@ import com.veritasvault.repository.UserRepository;
 import com.veritasvault.util.ChecksumUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
 import java.time.Year;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
  * Service managing evidence intake, cryptographic verification,
- * storage coordination, and automated chain of custody auditing.
+ * storage coordination, state machine transitions, and automated chain of custody auditing.
  */
 @Service
 @RequiredArgsConstructor
@@ -110,13 +112,11 @@ public class EvidenceService {
         return mapToResponse(savedEvidence, file.getOriginalFilename(), file.getContentType());
     }
 
-
     @Transactional(readOnly = true)
     public EvidenceResponse getEvidenceById(Long id) {
         EvidenceItem evidence = findEvidenceById(id);
         return mapToResponse(evidence, null, null);
     }
-
 
     @Transactional(readOnly = true)
     public EvidenceResponse getEvidenceByTrackingCode(String trackingCode) {
@@ -124,7 +124,6 @@ public class EvidenceService {
                 .orElseThrow(() -> new ResourceNotFoundException("Evidence not found with tracking code: " + trackingCode));
         return mapToResponse(evidence, null, null);
     }
-
 
     @Transactional(readOnly = true)
     public List<EvidenceResponse> getEvidenceByCaseId(Long caseId) {
@@ -137,6 +136,14 @@ public class EvidenceService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public Page<EvidenceResponse> getEvidenceByCaseId(Long caseId, EvidenceStatus status, EvidenceType type, Pageable pageable) {
+        if (!legalCaseRepository.existsById(caseId)) {
+            throw new ResourceNotFoundException("Legal case not found with ID: " + caseId);
+        }
+        return evidenceItemRepository.findByCaseWithFilters(caseId, status, type, pageable)
+                .map(item -> mapToResponse(item, null, null));
+    }
 
     @Transactional(readOnly = true)
     public Resource loadEvidenceFile(Long id) {
@@ -144,7 +151,10 @@ public class EvidenceService {
         return fileStorageService.loadAsResource(evidence.getStorageUrl());
     }
 
-
+    /**
+     * Updates evidence operational status and appends a corresponding Chain of Custody log.
+     * Enforces strict state machine transition validation.
+     */
     @Transactional
     public EvidenceResponse updateStatus(
             Long id,
@@ -157,6 +167,12 @@ public class EvidenceService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + currentUserId));
 
         EvidenceStatus previousStatus = evidence.getStatus();
+
+        // Enforce state machine transitions
+        if (!isValidStatusTransition(previousStatus, newStatus)) {
+            throw new BadRequestException("Illegal evidence status transition from " + previousStatus + " to " + newStatus);
+        }
+
         evidence.setStatus(newStatus);
         EvidenceItem updated = evidenceItemRepository.save(evidence);
 
@@ -173,6 +189,34 @@ public class EvidenceService {
         custodyLogRepository.save(auditLog);
 
         return mapToResponse(updated, null, null);
+    }
+
+    /**
+     * Validates legal custodial lifecycle state transitions:
+     * - INGESTED -> AVAILABLE
+     * - AVAILABLE -> RESERVED, SEQUESTERED, STAMPED, ADMITTED
+     * - RESERVED -> IN_LAB, AVAILABLE
+     * - IN_LAB -> AVAILABLE, STAMPED
+     * - STAMPED -> AVAILABLE, ADMITTED
+     * - SEQUESTERED -> AVAILABLE
+     * - ADMITTED -> terminal state (judicial record lock)
+     */
+    public static boolean isValidStatusTransition(EvidenceStatus from, EvidenceStatus to) {
+        if (from == null || to == null) {
+            return false;
+        }
+        if (from == to) {
+            return true;
+        }
+        return switch (from) {
+            case INGESTED -> to == EvidenceStatus.AVAILABLE;
+            case AVAILABLE -> to == EvidenceStatus.RESERVED || to == EvidenceStatus.SEQUESTERED || to == EvidenceStatus.STAMPED || to == EvidenceStatus.ADMITTED;
+            case RESERVED -> to == EvidenceStatus.IN_LAB || to == EvidenceStatus.AVAILABLE;
+            case IN_LAB -> to == EvidenceStatus.AVAILABLE || to == EvidenceStatus.STAMPED;
+            case STAMPED -> to == EvidenceStatus.AVAILABLE || to == EvidenceStatus.ADMITTED;
+            case SEQUESTERED -> to == EvidenceStatus.AVAILABLE;
+            case ADMITTED -> false; // Terminal state once admitted to trial record
+        };
     }
 
     // --- Helper Methods ---

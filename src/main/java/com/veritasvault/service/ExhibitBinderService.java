@@ -4,6 +4,7 @@ import com.veritasvault.dto.request.AddExhibitRequest;
 import com.veritasvault.dto.request.CreateBinderRequest;
 import com.veritasvault.dto.response.BinderResponse;
 import com.veritasvault.exception.BadRequestException;
+import com.veritasvault.exception.ConflictException;
 import com.veritasvault.exception.ResourceNotFoundException;
 import com.veritasvault.model.BinderExhibit;
 import com.veritasvault.model.EvidenceItem;
@@ -18,16 +19,17 @@ import com.veritasvault.repository.ExhibitBinderRepository;
 import com.veritasvault.repository.LegalCaseRepository;
 import com.veritasvault.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
  * Service managing exhibit binder creation, trial bundle preparation,
- * immutability enforcement, and consecutive Bates stamping calculations.
+ * immutability enforcement, exhibit removal, and consecutive Bates stamping calculations.
  */
 @Service
 @RequiredArgsConstructor
@@ -54,6 +56,10 @@ public class ExhibitBinderService {
             throw new BadRequestException("Only attorneys or administrators can create exhibit binders");
         }
 
+        if (binderRepository.existsByLegalCaseIdAndBinderName(legalCase.getId(), request.getName().trim())) {
+            throw new ConflictException("An exhibit binder named '" + request.getName().trim() + "' already exists for this case");
+        }
+
         ExhibitBinder binder = ExhibitBinder.builder()
                 .legalCase(legalCase)
                 .binderName(request.getName().trim())
@@ -74,7 +80,7 @@ public class ExhibitBinderService {
     public BinderResponse addExhibitToBinder(Long binderId, AddExhibitRequest request) {
         ExhibitBinder binder = findBinderById(binderId);
 
-        // Immutability Rule #3: No additions to locked binders
+        // Immutability Rule: No modifications to locked binders
         assertBinderIsMutable(binder);
 
         EvidenceItem evidence = evidenceItemRepository.findById(request.getEvidenceId())
@@ -87,7 +93,7 @@ public class ExhibitBinderService {
 
         // Avoid adding the same evidence item twice to the same binder
         if (binderExhibitRepository.existsByBinderIdAndEvidenceItemId(binderId, evidence.getId())) {
-            throw new BadRequestException("Evidence item is already included in this binder");
+            throw new ConflictException("Evidence item is already included in this binder");
         }
 
         // Calculate consecutive Bates page offset
@@ -115,7 +121,42 @@ public class ExhibitBinderService {
     }
 
     /**
-     * Locks a binder by transitioning status to FINALIZED or SERVED.
+     * Removes an exhibit from a mutable binder and re-indexes Bates page numbers
+     * so no sequence gaps exist in the trial bundle.
+     */
+    @Transactional
+    public BinderResponse removeExhibitFromBinder(Long binderId, Long exhibitId) {
+        ExhibitBinder binder = findBinderById(binderId);
+        assertBinderIsMutable(binder);
+
+        BinderExhibit exhibit = binderExhibitRepository.findById(exhibitId)
+                .orElseThrow(() -> new ResourceNotFoundException("Exhibit not found with ID: " + exhibitId));
+
+        if (!exhibit.getBinder().getId().equals(binderId)) {
+            throw new BadRequestException("Exhibit ID " + exhibitId + " does not belong to binder #" + binderId);
+        }
+
+        binderExhibitRepository.delete(exhibit);
+        binderExhibitRepository.flush();
+
+        // Recalculate consecutive Bates ranges for remaining exhibits
+        List<BinderExhibit> remainingExhibits = binderExhibitRepository.findByBinderIdOrderByBatesStartNumAsc(binderId);
+        int currentStart = 1;
+        for (BinderExhibit be : remainingExhibits) {
+            int pageCount = (be.getBatesEndNum() - be.getBatesStartNum()) + 1;
+            be.setBatesStartNum(currentStart);
+            be.setBatesEndNum(currentStart + pageCount - 1);
+            currentStart = be.getBatesEndNum() + 1;
+        }
+        binderExhibitRepository.saveAll(remainingExhibits);
+
+        return mapToResponse(binder, remainingExhibits);
+    }
+
+    /**
+     * Locks a binder by transitioning status (FINALIZED, SERVED).
+     * Enforces immutability: once FINALIZED, it cannot revert to DRAFT or UNDER_REVIEW.
+     * Once SERVED, status cannot be modified.
      */
     @Transactional
     public BinderResponse updateStatus(Long binderId, BinderStatus newStatus) {
@@ -123,6 +164,12 @@ public class ExhibitBinderService {
 
         if (binder.getStatus() == BinderStatus.SERVED && newStatus != BinderStatus.SERVED) {
             throw new BadRequestException("Cannot modify status of a SERVED binder");
+        }
+
+        if (binder.getStatus() == BinderStatus.FINALIZED) {
+            if (newStatus != BinderStatus.FINALIZED && newStatus != BinderStatus.SERVED) {
+                throw new BadRequestException("Cannot revert a FINALIZED binder to " + newStatus);
+            }
         }
 
         binder.setStatus(newStatus);
@@ -151,6 +198,18 @@ public class ExhibitBinderService {
                     return mapToResponse(binder, exhibits);
                 })
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<BinderResponse> getBindersByCaseId(Long caseId, Pageable pageable) {
+        if (!legalCaseRepository.existsById(caseId)) {
+            throw new ResourceNotFoundException("Legal case not found with ID: " + caseId);
+        }
+        return binderRepository.findByLegalCaseId(caseId, pageable)
+                .map(binder -> {
+                    List<BinderExhibit> exhibits = binderExhibitRepository.findByBinderIdOrderByBatesStartNumAsc(binder.getId());
+                    return mapToResponse(binder, exhibits);
+                });
     }
 
     // --- Helper Validation & Mapping Methods ---

@@ -7,6 +7,9 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
+/**
+ * Service orchestrating outbound asynchronous and transactional email notifications.
+ */
 @Service
 public class EmailService {
 
@@ -14,7 +17,7 @@ public class EmailService {
 
     private final JavaMailSender mailSender;
 
-    @Value("${spring.mail.username}")
+    @Value("${spring.mail.username:noreply@veritasvault.com}")
     private String fromEmail;
 
     @Value("${app.server.base-url:http://localhost:8085}")
@@ -24,6 +27,9 @@ public class EmailService {
         this.mailSender = mailSender;
     }
 
+    /**
+     * Sends account verification link with a 24-hour cryptographic UUID token.
+     */
     public void sendVerificationEmail(String toEmail, String verificationToken) {
         try {
             String verificationUrl = baseUrl + "/api/auth/verify?token=" + verificationToken;
@@ -42,7 +48,28 @@ public class EmailService {
             log.info("Verification email sent to {}", toEmail);
         } catch (Exception e) {
             log.error("Failed to send verification email to {}: {}", toEmail, e.getMessage());
-            // Do not crash registration if email server has a temporary network blip
+        }
+    }
+
+    /**
+     * Sends password reset link with a 1-hour cryptographic token.
+     */
+    public void sendPasswordResetEmail(String toEmail, String resetToken) {
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromEmail);
+            message.setTo(toEmail);
+            message.setSubject("VeritasVault - Password Reset Request");
+            message.setText("Hello,\n\n"
+                    + "A password reset request was initiated for your VeritasVault account.\n\n"
+                    + "Your password reset token is:\n" + resetToken + "\n\n"
+                    + "This token will expire in 1 hour.\n\n"
+                    + "If you did not request this, please notify your administrator immediately.");
+
+            mailSender.send(message);
+            log.info("Password reset email sent to {}", toEmail);
+        } catch (Exception e) {
+            log.error("Failed to send password reset email to {}: {}", toEmail, e.getMessage());
         }
     }
 }

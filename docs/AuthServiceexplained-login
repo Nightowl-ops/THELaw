@@ -1,0 +1,75 @@
+The Input (Incoming Request)
+Suppose a user opens Postman and sends a POST request to http://localhost:8085/api/auth/login.
+
+Request Body (JSON):
+
+{
+  "email": "  Hasan.Attorney@VeritasVault.com  ",
+  "password": "SecurePassword2026!"
+}
+
+Spring Boot converts this JSON into your Java DTO: LoginRequest request.
+
+request.getEmail() = "  Hasan.Attorney@VeritasVault.com  "
+
+request.getPassword() = "SecurePassword2026!"
+
+Line 1: Normalizing the Email
+Java
+String normalizedEmail = request.getEmail().toLowerCase().trim();
+.trim() cuts off the leading and trailing spaces.
+
+.toLowerCase() converts all uppercase letters to lowercase.
+
+Resulting Variable:
+
+normalizedEmail is now strictly "hasan.attorney@veritasvault.com".
+
+Why this matters: In PostgreSQL, strings are case-sensitive by default ("Hasan@..." is not equal to "hasan@..."). Without normalization, accidental capitalization or phone auto-correct spaces would cause a login failure.
+
+3. Line 2: Creating the Token Package
+Java
+
+new UsernamePasswordAuthenticationToken(normalizedEmail, request.getPassword())
+This does not create a JWT.
+
+This is a temporary container created by Spring Security that wraps the two raw credentials:
+
+Principal (username/email): "hasan.attorney@veritasvault.com"
+
+Credentials (raw password): "SecurePassword2026!"
+
+Think of it as putting the email and raw password into an envelope to hand to the security guard.
+
+4. Line 3: Handing Off to authenticationManager.authenticate(...)
+Java
+Authentication authentication = authenticationManager.authenticate(...);
+This single line triggers Spring Security's internal verification chain. Behind the scenes, Spring automatically executes three steps:
+
+Step A: Lookup via MyUserDetailsService
+Spring calls MyUserDetailsService.loadUserByUsername("hasan.attorney@veritasvault.com").
+
+Hibernate runs: SELECT * FROM users WHERE email = 'hasan.attorney@veritasvault.com';
+
+If the user doesn't exist, it stops immediately and throws UsernameNotFoundException (which turns into BadCredentialsException).
+
+Step B: Password Verification via BCryptPasswordEncoder
+Spring takes the plaintext password "SecurePassword2026!" and compares it against the hashed password stored in the database (e.g., "$2a$10$e8...f2k").
+
+If the password doesn't match, it stops immediately and throws BadCredentialsException (HTTP 401).
+
+Step C: Status and Verification Check via MyUserDetails.isEnabled()
+Spring calls the isEnabled() method you wrote in MyUserDetails.java:
+
+Java
+return user.getStatus() == UserStatus.ACTIVE && Boolean.TRUE.equals(user.getIsEmailVerified());
+Case 1: If isEmailVerified == false, it stops immediately and throws DisabledException ("Account email has not been verified").
+
+Case 2: If status == UserStatus.INACTIVE (soft-deleted), it stops immediately and throws DisabledException ("User is disabled").
+
+5. The Outcome
+If any check fails: The method terminates immediately. No further lines of code execute, and GlobalExceptionHandler sends back an HTTP 401 or 400 error.
+
+If all checks pass: authenticationManager returns an Authentication object holding the validated user principal and their assigned roles (ROLE_ATTORNEY), and code execution proceeds to the next line.
+
+

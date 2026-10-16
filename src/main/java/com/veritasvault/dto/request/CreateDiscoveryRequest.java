@@ -4,7 +4,6 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Future;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -15,7 +14,9 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 import java.util.List;
 
-
+/**
+ * Inbound payload validating discovery package production requests.
+ */
 @Data
 @Builder
 @NoArgsConstructor
@@ -46,6 +47,8 @@ public class CreateDiscoveryRequest {
     @Min(value = 1, message = "Maximum downloads must be at least 1")
     private Integer maxDownloads;
 
-    @NotEmpty(message = "At least one evidence item ID must be included in the discovery package")
+    /**
+     * Optional specific evidence item IDs; if omitted, the entire binder contents are produced.
+     */
     private List<Long> evidenceItemIds;
 }

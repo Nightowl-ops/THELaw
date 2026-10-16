@@ -1,0 +1,71 @@
+What is AuthService?
+This class is the front door to the entire backend. It handles identity, security checks, and user lifecycle events before anyone gets access to the rest of the system.
+
+Instead of stuffing everything into controllers, AuthService keeps the core business logic clean by focusing on three main jobs:
+
+User Registration (register)
+
+Checks that the email isn't already taken in the database.
+
+Hashes the raw password with BCrypt (salting happens automatically here).
+
+Generates a secure activation token that expires in 24 hours.
+
+Saves the new user with isEmailVerified = false.
+
+Sends out a confirmation email via EmailService.
+
+Returns basic user details without issuing a JWT yet (since they aren't verified).
+
+Account Activation (verifyEmail)
+
+Takes the token from the email link.
+
+Checks if the token exists and makes sure the 24-hour window hasn't expired.
+
+Flips isEmailVerified to true.
+
+Clears the token fields from the database so the link cannot be used twice.
+
+User Login (login)
+
+Hands credentials over to Spring Security's AuthenticationManager.
+
+Checks account status: if the email isn't verified or the account is marked INACTIVE, login is denied immediately.
+
+If credentials and status are valid, it creates and returns a signed JWT Bearer token with the user's role and details.
+
+What Does This File Call / Depend On?
+Internal Services & Repositories
+UserRepository: Talks to PostgreSQL. Checks for existing emails (existsByEmail), finds users by token (findByVerificationToken), and saves updated records (save).
+
+JwtUtils: Creates signed JWT Bearer tokens containing the user's email and role.
+
+EmailService: Sends out the verification link through SMTP (Gmail).
+
+Spring Security Framework Tools
+PasswordEncoder: Uses BCrypt to hash passwords before they touch the database.
+
+AuthenticationManager: Spring Security's engine that checks if the entered password matches the stored hash and confirms the user is enabled.
+
+Entities & Enums
+User: The database entity representing the user account row.
+
+UserStatus: Tracks whether the account is ACTIVE or INACTIVE (for soft deletion).
+
+Role: Assigns system permissions (ROLE_ATTORNEY, ROLE_ADMIN, ROLE_FORENSIC_EXAMINER, ROLE_CLIENT).
+
+Data Transfer Objects (DTOs)
+RegisterRequest: Inbound JSON payload containing full name, email, password, and requested role.
+
+LoginRequest: Inbound JSON payload containing email and password.
+
+AuthResponse: Outbound response sent back to Postman or the frontend with user info and token details.
+
+Custom Exceptions
+BadRequestException: Thrown when an email already exists or a verification link is invalid/expired (returns HTTP 400).
+
+ResourceNotFoundException: Safety check thrown if the logged-in user cannot be found in the database (returns HTTP 404).
+
+so this is basically yayyy.
+

@@ -3,15 +3,21 @@ package com.veritasvault.controller;
 import com.veritasvault.dto.request.EvidenceUploadRequest;
 import com.veritasvault.dto.response.EvidenceResponse;
 import com.veritasvault.model.enums.EvidenceStatus;
+import com.veritasvault.model.enums.EvidenceType;
 import com.veritasvault.security.MyUserDetails;
 import com.veritasvault.service.EvidenceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Encoding;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -21,21 +27,20 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.List;
-
+/**
+ * Controller managing digital evidence intake, streaming cryptographic verification,
+ * storage coordination, binary streaming, and state machine transitions.
+ */
 @RestController
 @RequestMapping("/api/evidence")
 @RequiredArgsConstructor
+@Tag(name = "Evidence Vault", description = "Endpoints for evidence ingestion, streaming SHA-256 fingerprinting, retrieval, and status updates")
 public class EvidenceController {
 
     private final EvidenceService evidenceService;
 
-    /**
-     * Uploads a new evidence item, computes SHA-256 fingerprint, saves to disk,
-     * and writes an initial INGEST custody entry.
-     * Consumes multipart/form-data.
-     */
-    @Operation(summary = "Uploads a new evidence item, computes SHA-256 fingerprint, and records initial INGEST custody record")
+    @Operation(summary = "Upload and ingest digital evidence item",
+               description = "Computes SHA-256 fingerprint via streaming, stores file safely, and logs initial INGEST entry")
     @RequestBody(
             content = @Content(
                     mediaType = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -45,6 +50,9 @@ public class EvidenceController {
                     )
             )
     )
+    @ApiResponse(responseCode = "201", description = "Evidence uploaded and ingested with SHA-256 fingerprint")
+    @ApiResponse(responseCode = "400", description = "Invalid payload or empty file")
+    @ApiResponse(responseCode = "413", description = "File exceeds maximum upload size")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ROLE_ATTORNEY', 'ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
     public ResponseEntity<EvidenceResponse> uploadEvidence(
@@ -57,9 +65,9 @@ public class EvidenceController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
-    /**
-     * Retrieves evidence details by internal database ID.
-     */
+    @Operation(summary = "Get evidence by ID", description = "Retrieves evidence metadata by internal database ID")
+    @ApiResponse(responseCode = "200", description = "Evidence metadata returned")
+    @ApiResponse(responseCode = "404", description = "Evidence item not found")
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('ROLE_ATTORNEY', 'ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
     public ResponseEntity<EvidenceResponse> getEvidenceById(@PathVariable Long id) {
@@ -67,9 +75,9 @@ public class EvidenceController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Retrieves evidence details by tracking code (e.g., 'EV-2026-0001').
-     */
+    @Operation(summary = "Get evidence by tracking code", description = "Retrieves evidence by unique court tracking code (e.g., 'EV-2026-0001')")
+    @ApiResponse(responseCode = "200", description = "Evidence metadata returned")
+    @ApiResponse(responseCode = "404", description = "Tracking code not found")
     @GetMapping("/tracking/{trackingCode}")
     @PreAuthorize("hasAnyRole('ROLE_ATTORNEY', 'ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
     public ResponseEntity<EvidenceResponse> getEvidenceByTrackingCode(@PathVariable String trackingCode) {
@@ -77,19 +85,25 @@ public class EvidenceController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Retrieves all evidence items tied to a specific case.
-     */
+    @Operation(summary = "List evidence items in case with pagination & filtering",
+               description = "Retrieves paginated evidence items tied to a legal case with optional status and type filters")
+    @ApiResponse(responseCode = "200", description = "Page of evidence items returned")
+    @ApiResponse(responseCode = "404", description = "Legal case not found")
     @GetMapping("/case/{caseId}")
     @PreAuthorize("hasAnyRole('ROLE_ATTORNEY', 'ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
-    public ResponseEntity<List<EvidenceResponse>> getEvidenceByCaseId(@PathVariable Long caseId) {
-        List<EvidenceResponse> items = evidenceService.getEvidenceByCaseId(caseId);
+    public ResponseEntity<Page<EvidenceResponse>> getEvidenceByCaseId(
+            @PathVariable Long caseId,
+            @RequestParam(value = "status", required = false) EvidenceStatus status,
+            @RequestParam(value = "type", required = false) EvidenceType type,
+            @PageableDefault(size = 20, sort = "createdAt") Pageable pageable
+    ) {
+        Page<EvidenceResponse> items = evidenceService.getEvidenceByCaseId(caseId, status, type, pageable);
         return ResponseEntity.ok(items);
     }
 
-    /**
-     * Streams the stored evidence file for download.
-     */
+    @Operation(summary = "Download evidence binary file", description = "Streams the stored evidence binary file from disk")
+    @ApiResponse(responseCode = "200", description = "Evidence file stream")
+    @ApiResponse(responseCode = "404", description = "Evidence or file not found")
     @GetMapping("/{id}/download")
     @PreAuthorize("hasAnyRole('ROLE_ATTORNEY', 'ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
     public ResponseEntity<Resource> downloadEvidenceFile(@PathVariable Long id) {
@@ -102,10 +116,11 @@ public class EvidenceController {
                 .body(resource);
     }
 
-    /**
-     * Updates evidence operational status (e.g., AVAILABLE, SEQUESTERED)
-     * and appends a corresponding immutable Chain of Custody entry.
-     */
+    @Operation(summary = "Update evidence operational status",
+               description = "Enforces state machine transition rules and logs audit entry in Chain of Custody")
+    @ApiResponse(responseCode = "200", description = "Status updated successfully")
+    @ApiResponse(responseCode = "400", description = "Illegal state transition attempted")
+    @ApiResponse(responseCode = "404", description = "Evidence not found")
     @PatchMapping("/{id}/status")
     @PreAuthorize("hasAnyRole('ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
     public ResponseEntity<EvidenceResponse> updateStatus(

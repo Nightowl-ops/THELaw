@@ -3,6 +3,7 @@ package com.veritasvault.service;
 import com.veritasvault.dto.request.CustodyReservationRequest;
 import com.veritasvault.dto.response.CustodyReservationResponse;
 import com.veritasvault.exception.BadRequestException;
+import com.veritasvault.exception.ConflictException;
 import com.veritasvault.exception.ResourceNotFoundException;
 import com.veritasvault.model.ChainOfCustodyLog;
 import com.veritasvault.model.CustodyReservation;
@@ -17,6 +18,9 @@ import com.veritasvault.repository.CustodyReservationRepository;
 import com.veritasvault.repository.EvidenceItemRepository;
 import com.veritasvault.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +28,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Service managing forensic laboratory scheduling, double-booking collision prevention,
+ * pessimistic row locking, and live SSE event telemetry.
+ */
 @Service
 @RequiredArgsConstructor
 public class CustodyReservationService {
@@ -32,36 +40,40 @@ public class CustodyReservationService {
     private final EvidenceItemRepository evidenceItemRepository;
     private final UserRepository userRepository;
     private final ChainOfCustodyLogRepository custodyLogRepository;
-
-
     private final NotificationService notificationService;
-// this is used if an error occurs anywhere inside all the database modifications rollback take the validated input payload request ad the authentication user id examiner Id
+
+    /**
+     * Books a forensic lab time slot for an evidence item.
+     * Uses a database pessimistic write lock on the evidence row to prevent concurrent race conditions.
+     *
+     * @param request     Reservation time payload
+     * @param examinerId  ID of the requesting forensic examiner
+     * @return CustodyReservationResponse with booking details
+     * @throws ConflictException if an overlapping booking exists (HTTP 409)
+     * @throws BadRequestException if the dates are invalid or evidence is sequestered/admitted
+     */
     @Transactional
     public CustodyReservationResponse createReservation(CustodyReservationRequest request, Long examinerId) {
 
-        // 1. Time boundary validation it is used to check the end and start time
-        // this is used to make sure that the start time will not be the end time and the reverse
-        // two possiblilty one is the starting time start after the end time and the second is that both are equal
-
+        // 1. Time boundary validation
         if (request.getStartTime().isAfter(request.getEndTime()) || request.getStartTime().isEqual(request.getEndTime())) {
             throw new BadRequestException("Reservation start time must be strictly before end time");
         }
-
-        /// this is used to check that the checking time is before the current time which doesnt make sense
-
 
         if (request.getStartTime().isBefore(LocalDateTime.now())) {
             throw new BadRequestException("Cannot create a reservation for a date or time in the past");
         }
 
-        // 2. Fetch and validate Evidence Item does it exist or not
-        EvidenceItem evidence = evidenceItemRepository.findById(request.getEvidenceItemId())
-                .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId()));
+        // 2. Fetch Evidence Item with Pessimistic Row Lock to serialize concurrent requests
+        EvidenceItem evidence = evidenceItemRepository.findByIdWithPessimisticLock(request.getEvidenceItemId())
+                .orElseGet(() -> evidenceItemRepository.findById(request.getEvidenceItemId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId())));
 
         if (evidence.getStatus() == EvidenceStatus.SEQUESTERED || evidence.getStatus() == EvidenceStatus.ADMITTED) {
             throw new BadRequestException("Evidence item cannot be reserved: current status is " + evidence.getStatus());
         }
-        // 3. Fetch and validate Examiner
+
+        // 3. Validate Examiner permissions
         User examiner = userRepository.findById(examinerId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + examinerId));
 
@@ -69,7 +81,7 @@ public class CustodyReservationService {
             throw new BadRequestException("Only users with ROLE_FORENSIC_EXAMINER or ROLE_ADMIN can reserve custody slots");
         }
 
-        // 4. Double-Booking Collision Check to check when a collistion
+        // 4. Double-Booking Collision Check
         List<ReservationStatus> blockingStatuses = List.of(ReservationStatus.CONFIRMED, ReservationStatus.ACTIVE);
         List<CustodyReservation> overlaps = reservationRepository.findOverlappingReservations(
                 evidence.getId(),
@@ -79,10 +91,10 @@ public class CustodyReservationService {
         );
 
         if (!overlaps.isEmpty()) {
-            throw new BadRequestException("Time conflict: Evidence item is already booked during the requested interval");
+            throw new ConflictException("Time conflict: Evidence item is already booked during the requested interval");
         }
 
-        // 5. Build and save CustodyReservation entity when nothings has been found as a conflict it will excute and this response will be shown to the user in the swagger
+        // 5. Build and save CustodyReservation entity
         CustodyReservation reservation = CustodyReservation.builder()
                 .evidenceItem(evidence)
                 .examiner(examiner)
@@ -99,12 +111,15 @@ public class CustodyReservationService {
 
         CustodyReservationResponse response = mapToResponse(savedReservation);
 
-
         notificationService.broadcast("CUSTODY_RESERVATION_CREATED", response);
 
         return response;
     }
 
+    /**
+     * Cancels an active or confirmed reservation and releases the slot.
+     * Enforces ownership: only the assigned examiner or an admin can cancel.
+     */
     @Transactional
     public CustodyReservationResponse cancelReservation(Long reservationId, Long currentUserId) {
         CustodyReservation reservation = findReservationById(reservationId);
@@ -116,7 +131,7 @@ public class CustodyReservationService {
         boolean isAdmin = currentUser.getRole() == Role.ROLE_ADMIN;
 
         if (!isAssignedExaminer && !isAdmin) {
-            throw new BadRequestException("You do not have permission to cancel this reservation");
+            throw new AccessDeniedException("Access denied: You do not have permission to cancel this reservation");
         }
 
         if (reservation.getStatus() == ReservationStatus.COMPLETED) {
@@ -144,12 +159,28 @@ public class CustodyReservationService {
                 .build();
         custodyLogRepository.save(cancellationLog);
 
-        return mapToResponse(updated);
+        CustodyReservationResponse response = mapToResponse(updated);
+        notificationService.broadcast("CUSTODY_RESERVATION_CANCELLED", response);
+        return response;
     }
 
+    /**
+     * Checks out evidence for active lab analysis.
+     * Enforces ownership: only the assigned examiner or an admin can check out.
+     */
     @Transactional
     public CustodyReservationResponse checkOutEvidence(Long reservationId, Long currentUserId) {
         CustodyReservation reservation = findReservationById(reservationId);
+
+        User currentUser = userRepository.findById(currentUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + currentUserId));
+
+        boolean isAssignedExaminer = reservation.getExaminer().getId().equals(currentUserId);
+        boolean isAdmin = currentUser.getRole() == Role.ROLE_ADMIN;
+
+        if (!isAssignedExaminer && !isAdmin) {
+            throw new AccessDeniedException("Access denied: You can only check out reservations assigned to you");
+        }
 
         if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
             throw new BadRequestException("Only CONFIRMED reservations can be checked out");
@@ -162,12 +193,9 @@ public class CustodyReservationService {
         evidence.setStatus(EvidenceStatus.IN_LAB);
         evidenceItemRepository.save(evidence);
 
-        User actor = userRepository.findById(currentUserId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + currentUserId));
-
         ChainOfCustodyLog log = ChainOfCustodyLog.builder()
                 .evidenceItem(evidence)
-                .actor(actor)
+                .actor(currentUser)
                 .actionType(CustodyActionType.CHECK_OUT)
                 .notes("Evidence checked out for lab examination under reservation #" + reservation.getId())
                 .hashAtEvent(evidence.getSha256Hash())
@@ -176,15 +204,28 @@ public class CustodyReservationService {
 
         CustodyReservationResponse response = mapToResponse(updated);
 
-
         notificationService.broadcast("EVIDENCE_CHECKED_OUT", response);
 
         return response;
     }
 
+    /**
+     * Checks in evidence after lab analysis is completed.
+     * Enforces ownership: only the assigned examiner or an admin can check in.
+     */
     @Transactional
     public CustodyReservationResponse checkInEvidence(Long reservationId, String checkInNotes, Long currentUserId) {
         CustodyReservation reservation = findReservationById(reservationId);
+
+        User currentUser = userRepository.findById(currentUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + currentUserId));
+
+        boolean isAssignedExaminer = reservation.getExaminer().getId().equals(currentUserId);
+        boolean isAdmin = currentUser.getRole() == Role.ROLE_ADMIN;
+
+        if (!isAssignedExaminer && !isAdmin) {
+            throw new AccessDeniedException("Access denied: You can only check in reservations assigned to you");
+        }
 
         if (reservation.getStatus() != ReservationStatus.ACTIVE) {
             throw new BadRequestException("Only ACTIVE reservations can be checked in");
@@ -197,19 +238,18 @@ public class CustodyReservationService {
         evidence.setStatus(EvidenceStatus.AVAILABLE);
         evidenceItemRepository.save(evidence);
 
-        User actor = userRepository.findById(currentUserId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + currentUserId));
-
         ChainOfCustodyLog log = ChainOfCustodyLog.builder()
                 .evidenceItem(evidence)
-                .actor(actor)
+                .actor(currentUser)
                 .actionType(CustodyActionType.CHECK_IN)
                 .notes("Evidence checked in from lab analysis. Notes: " + (checkInNotes != null ? checkInNotes : "N/A"))
                 .hashAtEvent(evidence.getSha256Hash())
                 .build();
         custodyLogRepository.save(log);
 
-        return mapToResponse(updated);
+        CustodyReservationResponse response = mapToResponse(updated);
+        notificationService.broadcast("EVIDENCE_CHECKED_IN", response);
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -229,6 +269,15 @@ public class CustodyReservationService {
     }
 
     @Transactional(readOnly = true)
+    public Page<CustodyReservationResponse> getReservationsForEvidence(Long evidenceId, Pageable pageable) {
+        if (!evidenceItemRepository.existsById(evidenceId)) {
+            throw new ResourceNotFoundException("Evidence item not found with ID: " + evidenceId);
+        }
+        return reservationRepository.findByEvidenceItemId(evidenceId, pageable)
+                .map(this::mapToResponse);
+    }
+
+    @Transactional(readOnly = true)
     public List<CustodyReservationResponse> getReservationsForExaminer(Long examinerId) {
         if (!userRepository.existsById(examinerId)) {
             throw new ResourceNotFoundException("User not found with ID: " + examinerId);
@@ -237,6 +286,15 @@ public class CustodyReservationService {
                 .stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<CustodyReservationResponse> getReservationsForExaminer(Long examinerId, Pageable pageable) {
+        if (!userRepository.existsById(examinerId)) {
+            throw new ResourceNotFoundException("User not found with ID: " + examinerId);
+        }
+        return reservationRepository.findByExaminerId(examinerId, pageable)
+                .map(this::mapToResponse);
     }
 
     private CustodyReservation findReservationById(Long id) {
