@@ -35,7 +35,6 @@ public class EvidenceResponse {
     private String policeIncidentReportNum;
     private Long uploadedById;
     private String uploadedByName;
-    private LocalDateTime collectedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

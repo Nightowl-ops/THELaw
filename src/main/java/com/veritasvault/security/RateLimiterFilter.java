@@ -6,6 +6,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.lang.NonNull;
@@ -18,11 +19,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * In-memory sliding-window rate limiting filter protecting sensitive authentication
- * and recovery endpoints against brute force and credential stuffing attacks.
- */
 @Component
+@RequiredArgsConstructor
 public class RateLimiterFilter extends OncePerRequestFilter {
 
     private static final int MAX_REQUESTS_PER_MINUTE = 15;
@@ -30,10 +28,6 @@ public class RateLimiterFilter extends OncePerRequestFilter {
 
     private final ObjectMapper objectMapper;
     private final Map<String, RequestCounter> requestCounts = new ConcurrentHashMap<>();
-
-    public RateLimiterFilter(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
-    }
 
     @Override
     protected void doFilterInternal(

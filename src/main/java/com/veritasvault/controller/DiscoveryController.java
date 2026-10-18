@@ -22,10 +22,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-/**
- * Controller managing discovery production packages, expiring token links,
- * public file downloads, and Proof of Service audit logs.
- */
 @RestController
 @RequestMapping("/api/discovery")
 @RequiredArgsConstructor

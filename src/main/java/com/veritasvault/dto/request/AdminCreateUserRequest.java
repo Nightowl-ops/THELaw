@@ -11,9 +11,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Request payload for administrative provisioning of accounts across all system roles.
- */
 @Data
 @Builder
 @NoArgsConstructor

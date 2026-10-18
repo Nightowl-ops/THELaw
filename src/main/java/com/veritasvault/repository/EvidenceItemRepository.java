@@ -15,9 +15,6 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * Spring Data JPA repository for EvidenceItem forensic assets.
- */
 @Repository
 public interface EvidenceItemRepository extends JpaRepository<EvidenceItem, Long> {
 
@@ -42,10 +39,6 @@ public interface EvidenceItemRepository extends JpaRepository<EvidenceItem, Long
             Pageable pageable
     );
 
-    /**
-     * Acquires a pessimistic write lock on the evidence row to prevent
-     * concurrent booking race conditions and eliminate double-booking collision anomalies.
-     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT e FROM EvidenceItem e WHERE e.id = :id")
     Optional<EvidenceItem> findByIdWithPessimisticLock(@Param("id") Long id);

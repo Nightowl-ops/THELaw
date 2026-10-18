@@ -15,10 +15,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Service managing administrative user administration, role delegation,
- * and soft-delete state transitions.
- */
 @Service
 @RequiredArgsConstructor
 public class AdminUserService {
@@ -27,9 +23,6 @@ public class AdminUserService {
     private final PasswordEncoder passwordEncoder;
     private final AuthService authService;
 
-    /**
-     * Lists users with pagination, sorting, and dynamic role/status/keyword filtering.
-     */
     @Transactional(readOnly = true)
     public Page<UserProfileResponse> getUsers(Role role, UserStatus status, String search, Pageable pageable) {
         String query = (search != null && !search.isBlank()) ? search.trim() : null;
@@ -37,9 +30,6 @@ public class AdminUserService {
                 .map(authService::mapToProfileResponse);
     }
 
-    /**
-     * Provisions a user account with an administrator-specified role and initial profile details.
-     */
     @Transactional
     public UserProfileResponse createUser(AdminCreateUserRequest request) {
         String normalizedEmail = request.getEmail().toLowerCase().trim();
@@ -54,7 +44,7 @@ public class AdminUserService {
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .role(request.getRole())
                 .status(UserStatus.ACTIVE)
-                .isEmailVerified(true) // Admin-created accounts are verified immediately
+                .isEmailVerified(true)
                 .phoneNumber(request.getPhoneNumber())
                 .organizationOrAgency(request.getOrganizationOrAgency())
                 .barOrBadgeNumber(request.getBarOrBadgeNumber())
@@ -64,9 +54,6 @@ public class AdminUserService {
         return authService.mapToProfileResponse(saved);
     }
 
-    /**
-     * Updates account lifecycle status (enabling active use or performing soft-delete).
-     */
     @Transactional
     public UserProfileResponse updateUserStatus(Long userId, UserStatus status) {
         User user = userRepository.findById(userId)
@@ -77,9 +64,6 @@ public class AdminUserService {
         return authService.mapToProfileResponse(updated);
     }
 
-    /**
-     * Updates an account's security role authorization.
-     */
     @Transactional
     public UserProfileResponse updateUserRole(Long userId, Role newRole) {
         User user = userRepository.findById(userId)

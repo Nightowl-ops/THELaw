@@ -1,5 +1,6 @@
 package com.veritasvault.service;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -7,10 +8,8 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
-/**
- * Service orchestrating outbound asynchronous and transactional email notifications.
- */
 @Service
+@RequiredArgsConstructor
 public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
@@ -23,13 +22,6 @@ public class EmailService {
     @Value("${app.server.base-url:http://localhost:8085}")
     private String baseUrl;
 
-    public EmailService(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
-    }
-
-    /**
-     * Sends account verification link with a 24-hour cryptographic UUID token.
-     */
     public void sendVerificationEmail(String toEmail, String verificationToken) {
         try {
             String verificationUrl = baseUrl + "/api/auth/verify?token=" + verificationToken;
@@ -51,9 +43,6 @@ public class EmailService {
         }
     }
 
-    /**
-     * Sends password reset link with a 1-hour cryptographic token.
-     */
     public void sendPasswordResetEmail(String toEmail, String resetToken) {
         try {
             SimpleMailMessage message = new SimpleMailMessage();

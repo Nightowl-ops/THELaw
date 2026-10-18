@@ -27,10 +27,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-/**
- * Controller managing digital evidence intake, streaming cryptographic verification,
- * storage coordination, binary streaming, and state machine transitions.
- */
 @RestController
 @RequestMapping("/api/evidence")
 @RequiredArgsConstructor

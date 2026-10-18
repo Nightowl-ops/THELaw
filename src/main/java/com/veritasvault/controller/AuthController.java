@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -22,20 +23,13 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-/**
- * REST controller managing authentication, identity verification,
- * credentials recovery, and user profile lifecycle.
- */
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 @Tag(name = "Authentication & Identity", description = "Endpoints for user registration, login, email verification, password management, and user profile")
 public class AuthController {
 
     private final AuthService authService;
-
-    public AuthController(AuthService authService) {
-        this.authService = authService;
-    }
 
     @Operation(summary = "Register new account", description = "Registers a new user account defaulting to ROLE_CLIENT and dispatches an activation email")
     @ApiResponse(responseCode = "201", description = "Account created; activation token dispatched")

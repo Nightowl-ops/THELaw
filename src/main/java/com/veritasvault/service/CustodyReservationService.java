@@ -28,10 +28,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Service managing forensic laboratory scheduling, double-booking collision prevention,
- * pessimistic row locking, and live SSE event telemetry.
- */
 @Service
 @RequiredArgsConstructor
 public class CustodyReservationService {
@@ -42,20 +38,9 @@ public class CustodyReservationService {
     private final ChainOfCustodyLogRepository custodyLogRepository;
     private final NotificationService notificationService;
 
-    /**
-     * Books a forensic lab time slot for an evidence item.
-     * Uses a database pessimistic write lock on the evidence row to prevent concurrent race conditions.
-     *
-     * @param request     Reservation time payload
-     * @param examinerId  ID of the requesting forensic examiner
-     * @return CustodyReservationResponse with booking details
-     * @throws ConflictException if an overlapping booking exists (HTTP 409)
-     * @throws BadRequestException if the dates are invalid or evidence is sequestered/admitted
-     */
     @Transactional
     public CustodyReservationResponse createReservation(CustodyReservationRequest request, Long examinerId) {
 
-        // 1. Time boundary validation
         if (request.getStartTime().isAfter(request.getEndTime()) || request.getStartTime().isEqual(request.getEndTime())) {
             throw new BadRequestException("Reservation start time must be strictly before end time");
         }
@@ -64,16 +49,13 @@ public class CustodyReservationService {
             throw new BadRequestException("Cannot create a reservation for a date or time in the past");
         }
 
-        // 2. Fetch Evidence Item with Pessimistic Row Lock to serialize concurrent requests
         EvidenceItem evidence = evidenceItemRepository.findByIdWithPessimisticLock(request.getEvidenceItemId())
-                .orElseGet(() -> evidenceItemRepository.findById(request.getEvidenceItemId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId())));
+                .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId()));
 
         if (evidence.getStatus() == EvidenceStatus.SEQUESTERED || evidence.getStatus() == EvidenceStatus.ADMITTED) {
             throw new BadRequestException("Evidence item cannot be reserved: current status is " + evidence.getStatus());
         }
 
-        // 3. Validate Examiner permissions
         User examiner = userRepository.findById(examinerId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + examinerId));
 
@@ -81,7 +63,6 @@ public class CustodyReservationService {
             throw new BadRequestException("Only users with ROLE_FORENSIC_EXAMINER or ROLE_ADMIN can reserve custody slots");
         }
 
-        // 4. Double-Booking Collision Check
         List<ReservationStatus> blockingStatuses = List.of(ReservationStatus.CONFIRMED, ReservationStatus.ACTIVE);
         List<CustodyReservation> overlaps = reservationRepository.findOverlappingReservations(
                 evidence.getId(),
@@ -94,7 +75,6 @@ public class CustodyReservationService {
             throw new ConflictException("Time conflict: Evidence item is already booked during the requested interval");
         }
 
-        // 5. Build and save CustodyReservation entity
         CustodyReservation reservation = CustodyReservation.builder()
                 .evidenceItem(evidence)
                 .examiner(examiner)
@@ -116,10 +96,6 @@ public class CustodyReservationService {
         return response;
     }
 
-    /**
-     * Cancels an active or confirmed reservation and releases the slot.
-     * Enforces ownership: only the assigned examiner or an admin can cancel.
-     */
     @Transactional
     public CustodyReservationResponse cancelReservation(Long reservationId, Long currentUserId) {
         CustodyReservation reservation = findReservationById(reservationId);
@@ -164,10 +140,6 @@ public class CustodyReservationService {
         return response;
     }
 
-    /**
-     * Checks out evidence for active lab analysis.
-     * Enforces ownership: only the assigned examiner or an admin can check out.
-     */
     @Transactional
     public CustodyReservationResponse checkOutEvidence(Long reservationId, Long currentUserId) {
         CustodyReservation reservation = findReservationById(reservationId);
@@ -209,10 +181,6 @@ public class CustodyReservationService {
         return response;
     }
 
-    /**
-     * Checks in evidence after lab analysis is completed.
-     * Enforces ownership: only the assigned examiner or an admin can check in.
-     */
     @Transactional
     public CustodyReservationResponse checkInEvidence(Long reservationId, String checkInNotes, Long currentUserId) {
         CustodyReservation reservation = findReservationById(reservationId);

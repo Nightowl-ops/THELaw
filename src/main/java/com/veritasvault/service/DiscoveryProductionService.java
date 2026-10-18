@@ -3,6 +3,7 @@ package com.veritasvault.service;
 import com.veritasvault.dto.request.CreateDiscoveryRequest;
 import com.veritasvault.dto.response.DiscoveryReceiptResponse;
 import com.veritasvault.dto.response.DiscoveryResponse;
+import com.veritasvault.dto.response.EvidenceResponse;
 import com.veritasvault.exception.BadRequestException;
 import com.veritasvault.exception.ResourceNotFoundException;
 import com.veritasvault.model.BinderExhibit;
@@ -35,10 +36,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/**
- * Service managing external discovery production packages, time-limited token links,
- * cryptographic token hashing, file streaming, and immutable access telemetry for legal Proof of Service.
- */
 @Service
 @RequiredArgsConstructor
 public class DiscoveryProductionService {
@@ -50,15 +47,11 @@ public class DiscoveryProductionService {
     private final BinderExhibitRepository binderExhibitRepository;
     private final UserRepository userRepository;
     private final FileStorageService fileStorageService;
+    private final EvidenceService evidenceService;
 
     @Value("${app.server.base-url:http://localhost:8085}")
     private String baseUrl;
 
-    /**
-     * Creates a discovery production package tied to an exhibit binder and generates
-     * a secure, time-expiring external access token. The database stores only the SHA-256
-     * hash of the token to prevent discovery hijacks during database leaks.
-     */
     @Transactional
     public DiscoveryResponse createProduction(CreateDiscoveryRequest request, Long binderId, Long currentUserId) {
         LegalCase legalCase = legalCaseRepository.findById(request.getCaseId())
@@ -82,7 +75,6 @@ public class DiscoveryProductionService {
             throw new BadRequestException("Expiration date must be in the future");
         }
 
-        // Generate non-guessable high-entropy token
         String rawAccessToken = UUID.randomUUID().toString();
         String tokenHash = hashToken(rawAccessToken);
 
@@ -99,17 +91,12 @@ public class DiscoveryProductionService {
 
         DiscoveryProduction saved = discoveryProductionRepository.save(production);
 
-        // Advance binder status to SERVED upon production
         binder.setStatus(BinderStatus.SERVED);
         exhibitBinderRepository.save(binder);
 
         return mapToResponse(saved, rawAccessToken);
     }
 
-    /**
-     * Validates an external token and returns discovery package details.
-     * Records access telemetry (IP and User-Agent) as courtroom Proof of Service.
-     */
     @Transactional
     public DiscoveryResponse accessProductionByToken(String rawAccessToken, String ipAddress, String userAgent) {
         DiscoveryProduction production = findByRawToken(rawAccessToken);
@@ -130,10 +117,6 @@ public class DiscoveryProductionService {
         return mapToResponse(production, rawAccessToken);
     }
 
-    /**
-     * Streams the discovery exhibit bundle for external counsel using the expiring token.
-     * Records telemetry in DiscoveryAccessLog.
-     */
     @Transactional
     public DownloadBundle loadProductionBundle(String rawAccessToken, String ipAddress, String userAgent) {
         DiscoveryProduction production = findByRawToken(rawAccessToken);
@@ -183,9 +166,6 @@ public class DiscoveryProductionService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Retrieves all external access logs for a production as legal Proof of Service.
-     */
     @Transactional(readOnly = true)
     public List<DiscoveryReceiptResponse> getReceipts(Long productionId) {
         if (!discoveryProductionRepository.existsById(productionId)) {
@@ -204,8 +184,6 @@ public class DiscoveryProductionService {
                         .build())
                 .collect(Collectors.toList());
     }
-
-    // --- Helper Token Hashing & Mapping Methods ---
 
     private DiscoveryProduction findByRawToken(String rawToken) {
         String tokenHash = hashToken(rawToken);
@@ -232,10 +210,17 @@ public class DiscoveryProductionService {
                 .findByProductionIdOrderByAccessedAtDesc(production.getId())
                 .size();
 
+        List<EvidenceResponse> includedEvidence = binderExhibitRepository
+                .findByBinderIdOrderByBatesStartNumAsc(production.getBinder().getId())
+                .stream()
+                .map(be -> evidenceService.mapToResponse(be.getEvidenceItem(), null, null))
+                .collect(Collectors.toList());
+
         return DiscoveryResponse.builder()
                 .id(production.getId())
                 .caseId(production.getLegalCase().getId())
                 .caseNumber(production.getLegalCase().getCaseNumber())
+                .binderId(production.getBinder().getId())
                 .title(production.getBinder().getBinderName())
                 .description("Discovery bundle served to " + production.getTargetPartyName())
                 .accessToken(tokenToUse)
@@ -246,6 +231,7 @@ public class DiscoveryProductionService {
                 .isRevoked(LocalDateTime.now().isAfter(production.getExpiresAt()))
                 .createdById(production.getCreatedBy().getId())
                 .createdByName(production.getCreatedBy().getFullName())
+                .evidenceItems(includedEvidence)
                 .createdAt(production.getCreatedAt())
                 .build();
     }

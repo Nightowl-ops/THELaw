@@ -16,6 +16,7 @@ import com.veritasvault.model.enums.Role;
 import com.veritasvault.model.enums.UserStatus;
 import com.veritasvault.repository.UserRepository;
 import com.veritasvault.security.JwtUtils;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -28,11 +29,8 @@ import org.springframework.web.multipart.MultipartFile;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-/**
- * Service managing user identity lifecycle, credential authentication,
- * token generation, password recovery, and profile metadata.
- */
 @Service
+@RequiredArgsConstructor
 public class AuthService {
 
     private final UserRepository userRepository;
@@ -42,28 +40,6 @@ public class AuthService {
     private final EmailService emailService;
     private final FileStorageService fileStorageService;
 
-    public AuthService(UserRepository userRepository,
-                       PasswordEncoder passwordEncoder,
-                       AuthenticationManager authenticationManager,
-                       JwtUtils jwtUtils,
-                       EmailService emailService,
-                       FileStorageService fileStorageService) {
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
-        this.authenticationManager = authenticationManager;
-        this.jwtUtils = jwtUtils;
-        this.emailService = emailService;
-        this.fileStorageService = fileStorageService;
-    }
-
-    /**
-     * Registers a new user account with unverified email status.
-     * Enforces server-side role assignment (defaulting to ROLE_CLIENT).
-     *
-     * @param request User registration payload
-     * @return AuthResponse containing initial persisted user metadata
-     * @throws ConflictException if the email is already registered
-     */
     @Transactional
     public AuthResponse register(RegisterRequest request) {
         String normalizedEmail = request.getEmail().toLowerCase().trim();
@@ -75,8 +51,6 @@ public class AuthService {
         String verificationToken = UUID.randomUUID().toString();
         LocalDateTime tokenExpiry = LocalDateTime.now().plusHours(24);
 
-        // Server-enforced role: public self-registration defaults strictly to ROLE_CLIENT
-        // Privileged roles (ATTORNEY, FORENSIC_EXAMINER, ADMIN) are provisioned through admin endpoints
         Role assignedRole = Role.ROLE_CLIENT;
 
         User user = User.builder()
@@ -104,9 +78,6 @@ public class AuthService {
                 .build();
     }
 
-    /**
-     * Validates account activation token and transitions user to verified status.
-     */
     @Transactional
     public String verifyEmail(String token) {
         User user = userRepository.findByVerificationToken(token)
@@ -124,9 +95,6 @@ public class AuthService {
         return "Email verified successfully! You may now log in to VeritasVault.";
     }
 
-    /**
-     * Authenticates user credentials via Spring Security and generates signed JWT.
-     */
     public AuthResponse login(LoginRequest request) {
         String normalizedEmail = request.getEmail().toLowerCase().trim();
 
@@ -151,9 +119,6 @@ public class AuthService {
                 .build();
     }
 
-    /**
-     * Initiates password reset by issuing a 1-hour secure token and sending email.
-     */
     @Transactional
     public String forgotPassword(ForgotPasswordRequest request) {
         String normalizedEmail = request.getEmail().toLowerCase().trim();
@@ -167,13 +132,9 @@ public class AuthService {
             emailService.sendPasswordResetEmail(user.getEmail(), resetToken);
         });
 
-        // Always return success message to prevent user email enumeration
         return "If an account with that email exists, password reset instructions have been dispatched.";
     }
 
-    /**
-     * Resets user password using the issued reset token.
-     */
     @Transactional
     public String resetPassword(ResetPasswordRequest request) {
         User user = userRepository.findByPasswordResetToken(request.getToken())
@@ -191,9 +152,6 @@ public class AuthService {
         return "Password has been successfully reset. You may now log in.";
     }
 
-    /**
-     * Changes password for an authenticated user after verifying the current password.
-     */
     @Transactional
     public String changePassword(ChangePasswordRequest request, Long currentUserId) {
         User user = userRepository.findById(currentUserId)
@@ -209,9 +167,6 @@ public class AuthService {
         return "Password changed successfully.";
     }
 
-    /**
-     * Retrieves the profile information for the authenticated user.
-     */
     @Transactional(readOnly = true)
     public UserProfileResponse getCurrentUserProfile(Long currentUserId) {
         User user = userRepository.findById(currentUserId)
@@ -219,9 +174,6 @@ public class AuthService {
         return mapToProfileResponse(user);
     }
 
-    /**
-     * Updates profile attributes for the authenticated user.
-     */
     @Transactional
     public UserProfileResponse updateProfile(UpdateProfileRequest request, Long currentUserId) {
         User user = userRepository.findById(currentUserId)
@@ -236,9 +188,6 @@ public class AuthService {
         return mapToProfileResponse(updated);
     }
 
-    /**
-     * Uploads and updates profile picture for the authenticated user.
-     */
     @Transactional
     public UserProfileResponse updateProfilePicture(MultipartFile file, Long currentUserId) {
         if (file == null || file.isEmpty()) {
@@ -260,9 +209,6 @@ public class AuthService {
         return mapToProfileResponse(updated);
     }
 
-    /**
-     * Helper to map User entity to UserProfileResponse DTO.
-     */
     public UserProfileResponse mapToProfileResponse(User user) {
         return UserProfileResponse.builder()
                 .id(user.getId())

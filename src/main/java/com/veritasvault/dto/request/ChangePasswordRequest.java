@@ -7,9 +7,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Request payload for authenticated users to change their credentials.
- */
 @Data
 @Builder
 @NoArgsConstructor

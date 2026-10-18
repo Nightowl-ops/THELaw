@@ -7,9 +7,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Request payload to initiate a password reset workflow.
- */
 @Data
 @Builder
 @NoArgsConstructor

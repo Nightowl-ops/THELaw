@@ -21,17 +21,11 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Centralized exception interceptor for standardized JSON error responses.
- */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    /**
-     * Catches ResourceNotFoundException and maps to HTTP 404 NOT FOUND.
-     */
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFound(
             ResourceNotFoundException ex,
@@ -48,9 +42,6 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.NOT_FOUND);
     }
 
-    /**
-     * Catches ConflictException and maps to HTTP 409 CONFLICT.
-     */
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ErrorResponse> handleConflict(
             ConflictException ex,
@@ -67,9 +58,6 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.CONFLICT);
     }
 
-    /**
-     * Catches authentication and bad credentials errors, mapping to HTTP 401 UNAUTHORIZED.
-     */
     @ExceptionHandler({
             BadCredentialsException.class,
             DisabledException.class,
@@ -98,9 +86,6 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.UNAUTHORIZED);
     }
 
-    /**
-     * Catches custom business logic errors or invalid client arguments (HTTP 400 BAD REQUEST).
-     */
     @ExceptionHandler({BadRequestException.class, IllegalArgumentException.class, IllegalStateException.class})
     public ResponseEntity<ErrorResponse> handleBadRequest(
             RuntimeException ex,
@@ -117,9 +102,6 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
     }
 
-    /**
-     * Catches validation errors triggered by annotations like @Valid, @NotNull, @NotBlank.
-     */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationExceptions(
             MethodArgumentNotValidException ex,
@@ -142,9 +124,6 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
     }
 
-    /**
-     * Catches authorization failures when a role is insufficient (HTTP 403 FORBIDDEN).
-     */
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(
             AccessDeniedException ex,
@@ -161,9 +140,6 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.FORBIDDEN);
     }
 
-    /**
-     * Catches uploaded files exceeding maximum configured size limits (HTTP 413 PAYLOAD TOO LARGE).
-     */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ErrorResponse> handleMaxUploadSizeExceeded(
             MaxUploadSizeExceededException ex,
@@ -180,10 +156,6 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.PAYLOAD_TOO_LARGE);
     }
 
-    /**
-     * Fallback for unexpected internal errors.
-     * Sanitizes message to avoid leaking internal stack or system details (HTTP 500 INTERNAL SERVER ERROR).
-     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGlobalException(
             Exception ex,

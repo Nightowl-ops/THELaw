@@ -8,9 +8,6 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 
-/**
- * Spring Data JPA repository for ExhibitBinder trial bundles.
- */
 @Repository
 public interface ExhibitBinderRepository extends JpaRepository<ExhibitBinder, Long> {
 

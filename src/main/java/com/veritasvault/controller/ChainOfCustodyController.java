@@ -15,9 +15,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/**
- * Controller exposing append-only, tamper-evident Chain of Custody audit ledgers.
- */
 @RestController
 @RequestMapping("/api/custody/logs")
 @RequiredArgsConstructor

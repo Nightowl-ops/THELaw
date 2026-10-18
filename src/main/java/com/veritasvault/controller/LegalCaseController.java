@@ -22,10 +22,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-/**
- * Controller exposing legal case docket endpoints, attorney assignments,
- * and status transitions.
- */
 @RestController
 @RequestMapping("/api/cases")
 @RequiredArgsConstructor

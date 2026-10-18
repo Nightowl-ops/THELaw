@@ -18,10 +18,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * Controller managing forensic lab custody reservations, booking collision prevention,
- * and physical evidence checkout workflows.
- */
 @RestController
 @RequestMapping("/api/custody/reservations")
 @RequiredArgsConstructor

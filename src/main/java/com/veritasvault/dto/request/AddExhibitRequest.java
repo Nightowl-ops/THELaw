@@ -9,9 +9,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Inbound payload validating exhibit inclusion within a trial binder.
- */
 @Data
 @Builder
 @NoArgsConstructor
@@ -28,9 +25,4 @@ public class AddExhibitRequest {
     @NotNull(message = "Page count is required for Bates numbering calculation")
     @Min(value = 1, message = "Page count must be at least 1")
     private Integer pageCount;
-
-    @Min(value = 1, message = "Display sequence order must be 1 or greater")
-    private Integer sequenceOrder;
-
-    private String notes;
 }

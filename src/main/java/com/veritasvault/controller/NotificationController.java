@@ -12,9 +12,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-/**
- * Real-time event streaming controller utilizing Server-Sent Events (SSE).
- */
 @RestController
 @RequestMapping("/api/notifications")
 @RequiredArgsConstructor
@@ -23,10 +20,6 @@ public class NotificationController {
 
     private final NotificationService notificationService;
 
-    /**
-     * Subscribes to the authenticated real-time telemetry stream.
-     * Accessible by Attorneys, Forensic Examiners, and Admins.
-     */
     @Operation(summary = "Subscribe to live telemetry SSE stream",
                description = "Establishes a persistent SSE connection to receive live lab reservation and evidence state updates")
     @ApiResponse(responseCode = "200", description = "SSE stream established successfully")

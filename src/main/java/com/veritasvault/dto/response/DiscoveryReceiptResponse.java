@@ -7,9 +7,6 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/**
- * Audit receipt confirming external discovery document access and legal Proof of Service.
- */
 @Data
 @Builder
 @NoArgsConstructor

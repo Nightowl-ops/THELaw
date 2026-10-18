@@ -18,19 +18,17 @@ public class DiscoveryResponse {
     private Long id;
     private Long caseId;
     private String caseNumber;
+    private Long binderId;
     private String title;
     private String description;
     private String accessToken;
     private String downloadUrl;
     private String recipientParty;
-    private String recipientEmail;
     private LocalDateTime expiresAt;
-    private Integer maxDownloads;
     private Integer downloadCount;
     private Boolean isRevoked;
     private Long createdById;
     private String createdByName;
     private List<EvidenceResponse> evidenceItems;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }

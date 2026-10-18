@@ -34,13 +34,6 @@ public class FileStorageService {
         }
     }
 
-    /*
-      Stores an evidence file under a designated subfolder (e.g., "evidence/case-101").
-
-      @param file      the multipart payload
-     @param subfolder relative folder category or case directory
-      @return the relative normalized storage path of the stored file
-     */
     public String storeFile(MultipartFile file, String subfolder) {
         if (file.isEmpty()) {
             throw new BadRequestException("Cannot upload an empty file");
@@ -48,12 +41,10 @@ public class FileStorageService {
 
         String rawOriginalFilename = StringUtils.cleanPath(Objects.requireNonNull(file.getOriginalFilename()));
 
-        // Guard against Path Traversal vulnerabilities
         if (rawOriginalFilename.contains("..")) {
             throw new BadRequestException("Filename contains invalid path sequence: " + rawOriginalFilename);
         }
 
-        // Clean extension and generate a conflict-free unique file name
         String fileExtension = "";
         int extensionIndex = rawOriginalFilename.lastIndexOf('.');
         if (extensionIndex > 0) {
@@ -68,7 +59,6 @@ public class FileStorageService {
 
             Path targetPath = targetDirectory.resolve(uniqueFilename).normalize();
 
-            // Double check target path is strictly within the allowed root directory
             if (!targetPath.startsWith(this.rootStorageLocation)) {
                 throw new BadRequestException("Unauthorized storage path traversal attempt");
             }
@@ -77,19 +67,12 @@ public class FileStorageService {
                 Files.copy(inputStream, targetPath, StandardCopyOption.REPLACE_EXISTING);
             }
 
-            // Return relative path so database stores a portable reference
             return Paths.get(subfolder).resolve(uniqueFilename).toString().replace("\\", "/");
         } catch (IOException e) {
             throw new IllegalStateException("Failed to store file " + rawOriginalFilename, e);
         }
     }
 
-    /**
-     * Loads a file from disk as a readable Spring Resource for download or streaming.
-     *
-     * @param relativePath the relative storage path saved in the entity
-     * @return loaded UrlResource
-     */
     public Resource loadAsResource(String relativePath) {
         try {
             Path filePath = this.rootStorageLocation.resolve(relativePath).normalize();
@@ -109,11 +92,6 @@ public class FileStorageService {
         }
     }
 
-    /**
-     * Deletes a file from storage if present.
-     *
-     * @param relativePath the relative storage path
-     */
     public void deleteFile(String relativePath) {
         if (!StringUtils.hasText(relativePath)) {
             return;

@@ -7,9 +7,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Request payload to complete a password reset using a secure token.
- */
 @Data
 @Builder
 @NoArgsConstructor

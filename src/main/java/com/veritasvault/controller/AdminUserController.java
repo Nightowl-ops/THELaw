@@ -18,10 +18,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * Administrative controller for user provisioning, role promotion,
- * and account status management (including soft delete).
- */
 @RestController
 @RequestMapping("/api/admin/users")
 @RequiredArgsConstructor

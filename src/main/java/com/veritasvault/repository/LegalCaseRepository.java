@@ -13,9 +13,6 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * Spring Data JPA repository for LegalCase master records.
- */
 @Repository
 public interface LegalCaseRepository extends JpaRepository<LegalCase, Long> {
 

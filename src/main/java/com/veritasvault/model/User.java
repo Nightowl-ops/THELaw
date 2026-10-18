@@ -10,10 +10,6 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
 
-/**
- * Entity representing an authenticated user within the VeritasVault system.
- * Supports role-based access control, email verification, soft deletion, and profile metadata.
- */
 @Entity
 @Table(name = "users")
 @Getter

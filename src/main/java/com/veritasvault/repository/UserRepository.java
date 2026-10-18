@@ -12,9 +12,6 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 
-/**
- * Spring Data JPA repository providing persistence operations for User entities.
- */
 @Repository
 public interface UserRepository extends JpaRepository<User, Long> {
 
@@ -26,9 +23,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByPasswordResetToken(String passwordResetToken);
 
-    /**
-     * Searches and filters users with pagination and sorting.
-     */
     @Query("SELECT u FROM User u WHERE " +
             "(:role IS NULL OR u.role = :role) AND " +
             "(:status IS NULL OR u.status = :status) AND " +

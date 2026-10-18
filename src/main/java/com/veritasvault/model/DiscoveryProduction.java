@@ -6,10 +6,6 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
-/**
- * Entity representing an outbound legal discovery package disclosure served to opposing counsel.
- * Features time-limited cryptographic token access, optional password gating, and access telemetry.
- */
 @Entity
 @Table(name = "discovery_productions")
 @Getter

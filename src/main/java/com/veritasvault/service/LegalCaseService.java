@@ -22,10 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Service orchestrating legal case creation, assignment validation,
- * access control enforcement, and lifecycle state management.
- */
 @Service
 @RequiredArgsConstructor
 public class LegalCaseService {
@@ -33,11 +29,6 @@ public class LegalCaseService {
     private final LegalCaseRepository legalCaseRepository;
     private final UserRepository userRepository;
 
-    /**
-     * Creates and registers a new legal proceeding case file.
-     * Enforces unique case numbering (throwing 409 Conflict if duplicate)
-     * and attorney credential verification.
-     */
     @Transactional
     public CaseResponse createCase(CreateCaseRequest request) {
         if (legalCaseRepository.existsByCaseNumber(request.getCaseNumber())) {
@@ -54,7 +45,7 @@ public class LegalCaseService {
         User client = null;
         if (request.getClientId() != null) {
             client = userRepository.findById(request.getClientId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Client not found with ID: " + request.getClientId()));
+                     .orElseThrow(() -> new ResourceNotFoundException("Client not found with ID: " + request.getClientId()));
 
             if (client.getRole() != Role.ROLE_CLIENT) {
                 throw new BadRequestException("User ID " + request.getClientId() + " must have ROLE_CLIENT");
@@ -77,16 +68,11 @@ public class LegalCaseService {
         return mapToResponse(saved);
     }
 
-    /**
-     * Retrieves a single case dossier by ID with strict ownership validation.
-     * Clients can only access their own assigned cases.
-     */
     @Transactional(readOnly = true)
     public CaseResponse getCaseById(Long id, User currentUser) {
         LegalCase legalCase = legalCaseRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Legal case not found with ID: " + id));
 
-        // Ownership enforcement for clients
         if (currentUser.getRole() == Role.ROLE_CLIENT) {
             if (legalCase.getClient() == null || !legalCase.getClient().getId().equals(currentUser.getId())) {
                 throw new AccessDeniedException("Access denied: You do not have permission to view this legal case");
@@ -103,10 +89,6 @@ public class LegalCaseService {
         return mapToResponse(legalCase);
     }
 
-    /**
-     * Retrieves paginated cases with filtering.
-     * Automatically constrains client queries to their owned records.
-     */
     @Transactional(readOnly = true)
     public Page<CaseResponse> getCases(CaseStatus status, CaseType type, String search, User currentUser, Pageable pageable) {
         String query = (search != null && !search.isBlank()) ? search.trim() : null;
@@ -136,9 +118,6 @@ public class LegalCaseService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Updates case lifecycle status (e.g. ACTIVE -> PENDING_TRIAL -> SETTLED -> ARCHIVED).
-     */
     @Transactional
     public CaseResponse updateCaseStatus(Long id, CaseStatus newStatus) {
         LegalCase legalCase = legalCaseRepository.findById(id)

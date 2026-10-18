@@ -11,11 +11,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/**
- * Inbound payload validating user self-registration.
- * Password strength rules are enforced at registration.
- * Roles are safely assigned by the server (defaulting to ROLE_CLIENT).
- */
 @Getter
 @Setter
 @NoArgsConstructor
@@ -38,9 +33,5 @@ public class RegisterRequest {
     )
     private String password;
 
-    /**
-     * Optional requested role. For public registration, the server enforces ROLE_CLIENT
-     * to prevent unauthorized elevation to administrative or legal roles.
-     */
     private Role role;
 }

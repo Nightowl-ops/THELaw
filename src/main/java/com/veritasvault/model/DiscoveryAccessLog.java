@@ -6,10 +6,6 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
-/**
- * Immutable audit log entity capturing external access telemetry
- * for discovery production downloads.
- */
 @Entity
 @Table(name = "discovery_access_logs")
 @Getter

@@ -29,10 +29,6 @@ import java.time.Year;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Service managing evidence intake, cryptographic verification,
- * storage coordination, state machine transitions, and automated chain of custody auditing.
- */
 @Service
 @RequiredArgsConstructor
 public class EvidenceService {
@@ -43,9 +39,6 @@ public class EvidenceService {
     private final ChainOfCustodyLogRepository custodyLogRepository;
     private final FileStorageService fileStorageService;
 
-    /**
-     * Uploads, hashes, and registers a new evidence item with an initial INGEST custody record.
-     */
     @Transactional
     public EvidenceResponse uploadEvidence(
             MultipartFile file,
@@ -62,7 +55,6 @@ public class EvidenceService {
         User uploader = userRepository.findById(currentUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + currentUserId));
 
-        // 1. Calculate SHA-256 fingerprint before saving
         String sha256Checksum;
         try {
             sha256Checksum = ChecksumUtils.calculateSha256(file.getInputStream());
@@ -70,14 +62,11 @@ public class EvidenceService {
             throw new BadRequestException("Failed to read file stream for SHA-256 checksum generation");
         }
 
-        // 2. Store binary asset on disk
         String subfolder = "evidence/case-" + legalCase.getId();
         String relativeStoragePath = fileStorageService.storeFile(file, subfolder);
 
-        // 3. Generate unique court tracking code
         String trackingCode = generateTrackingCode();
 
-        // 4. Construct and persist EvidenceItem entity
         EvidenceItem evidenceItem = EvidenceItem.builder()
                 .itemTrackingCode(trackingCode)
                 .legalCase(legalCase)
@@ -98,7 +87,6 @@ public class EvidenceService {
 
         EvidenceItem savedEvidence = evidenceItemRepository.save(evidenceItem);
 
-        // 5. Create immutable initial INGEST record in Chain of Custody
         ChainOfCustodyLog initialLog = ChainOfCustodyLog.builder()
                 .evidenceItem(savedEvidence)
                 .actor(uploader)
@@ -151,10 +139,6 @@ public class EvidenceService {
         return fileStorageService.loadAsResource(evidence.getStorageUrl());
     }
 
-    /**
-     * Updates evidence operational status and appends a corresponding Chain of Custody log.
-     * Enforces strict state machine transition validation.
-     */
     @Transactional
     public EvidenceResponse updateStatus(
             Long id,
@@ -168,7 +152,6 @@ public class EvidenceService {
 
         EvidenceStatus previousStatus = evidence.getStatus();
 
-        // Enforce state machine transitions
         if (!isValidStatusTransition(previousStatus, newStatus)) {
             throw new BadRequestException("Illegal evidence status transition from " + previousStatus + " to " + newStatus);
         }
@@ -191,16 +174,6 @@ public class EvidenceService {
         return mapToResponse(updated, null, null);
     }
 
-    /**
-     * Validates legal custodial lifecycle state transitions:
-     * - INGESTED -> AVAILABLE
-     * - AVAILABLE -> RESERVED, SEQUESTERED, STAMPED, ADMITTED
-     * - RESERVED -> IN_LAB, AVAILABLE
-     * - IN_LAB -> AVAILABLE, STAMPED
-     * - STAMPED -> AVAILABLE, ADMITTED
-     * - SEQUESTERED -> AVAILABLE
-     * - ADMITTED -> terminal state (judicial record lock)
-     */
     public static boolean isValidStatusTransition(EvidenceStatus from, EvidenceStatus to) {
         if (from == null || to == null) {
             return false;
@@ -215,11 +188,9 @@ public class EvidenceService {
             case IN_LAB -> to == EvidenceStatus.AVAILABLE || to == EvidenceStatus.STAMPED;
             case STAMPED -> to == EvidenceStatus.AVAILABLE || to == EvidenceStatus.ADMITTED;
             case SEQUESTERED -> to == EvidenceStatus.AVAILABLE;
-            case ADMITTED -> false; // Terminal state once admitted to trial record
+            case ADMITTED -> false;
         };
     }
-
-    // --- Helper Methods ---
 
     private EvidenceItem findEvidenceById(Long id) {
         return evidenceItemRepository.findById(id)

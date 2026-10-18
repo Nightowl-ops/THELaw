@@ -12,9 +12,6 @@ import org.springframework.stereotype.Repository;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * Repository providing persistence operations and collision detection queries for CustodyReservation entities.
- */
 @Repository
 public interface CustodyReservationRepository extends JpaRepository<CustodyReservation, Long> {
 
@@ -26,10 +23,6 @@ public interface CustodyReservationRepository extends JpaRepository<CustodyReser
 
     Page<CustodyReservation> findByExaminerId(Long examinerId, Pageable pageable);
 
-    /**
-     * Standard interval intersection collision query:
-     * Overlap occurs if existing.startTime < requestedEnd AND existing.endTime > requestedStart.
-     */
     @Query("SELECT r FROM CustodyReservation r " +
             "WHERE r.evidenceItem.id = :evidenceId " +
             "AND r.status IN (:activeStatuses) " +

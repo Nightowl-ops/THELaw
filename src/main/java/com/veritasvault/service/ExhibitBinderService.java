@@ -27,10 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Service managing exhibit binder creation, trial bundle preparation,
- * immutability enforcement, exhibit removal, and consecutive Bates stamping calculations.
- */
 @Service
 @RequiredArgsConstructor
 public class ExhibitBinderService {
@@ -41,9 +37,6 @@ public class ExhibitBinderService {
     private final EvidenceItemRepository evidenceItemRepository;
     private final UserRepository userRepository;
 
-    /**
-     * Initializes a new trial exhibit binder in DRAFT status.
-     */
     @Transactional
     public BinderResponse createBinder(CreateBinderRequest request, Long currentUserId) {
         LegalCase legalCase = legalCaseRepository.findById(request.getCaseId())
@@ -72,31 +65,23 @@ public class ExhibitBinderService {
         return mapToResponse(savedBinder, List.of());
     }
 
-    /**
-     * Attaches an evidence item to a binder with sequential Bates numbering.
-     * Enforces immutability: additions are blocked if binder is FINALIZED or SERVED.
-     */
     @Transactional
     public BinderResponse addExhibitToBinder(Long binderId, AddExhibitRequest request) {
         ExhibitBinder binder = findBinderById(binderId);
 
-        // Immutability Rule: No modifications to locked binders
         assertBinderIsMutable(binder);
 
         EvidenceItem evidence = evidenceItemRepository.findById(request.getEvidenceId())
                 .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceId()));
 
-        // Ensure evidence belongs to the same legal case
         if (!evidence.getLegalCase().getId().equals(binder.getLegalCase().getId())) {
             throw new BadRequestException("Evidence item does not belong to case #" + binder.getLegalCase().getCaseNumber());
         }
 
-        // Avoid adding the same evidence item twice to the same binder
         if (binderExhibitRepository.existsByBinderIdAndEvidenceItemId(binderId, evidence.getId())) {
             throw new ConflictException("Evidence item is already included in this binder");
         }
 
-        // Calculate consecutive Bates page offset
         List<BinderExhibit> existingExhibits = binderExhibitRepository.findByBinderIdOrderByBatesStartNumAsc(binderId);
         int nextBatesStart = 1;
         if (!existingExhibits.isEmpty()) {
@@ -120,10 +105,6 @@ public class ExhibitBinderService {
         return mapToResponse(binder, updatedExhibits);
     }
 
-    /**
-     * Removes an exhibit from a mutable binder and re-indexes Bates page numbers
-     * so no sequence gaps exist in the trial bundle.
-     */
     @Transactional
     public BinderResponse removeExhibitFromBinder(Long binderId, Long exhibitId) {
         ExhibitBinder binder = findBinderById(binderId);
@@ -139,7 +120,6 @@ public class ExhibitBinderService {
         binderExhibitRepository.delete(exhibit);
         binderExhibitRepository.flush();
 
-        // Recalculate consecutive Bates ranges for remaining exhibits
         List<BinderExhibit> remainingExhibits = binderExhibitRepository.findByBinderIdOrderByBatesStartNumAsc(binderId);
         int currentStart = 1;
         for (BinderExhibit be : remainingExhibits) {
@@ -153,11 +133,6 @@ public class ExhibitBinderService {
         return mapToResponse(binder, remainingExhibits);
     }
 
-    /**
-     * Locks a binder by transitioning status (FINALIZED, SERVED).
-     * Enforces immutability: once FINALIZED, it cannot revert to DRAFT or UNDER_REVIEW.
-     * Once SERVED, status cannot be modified.
-     */
     @Transactional
     public BinderResponse updateStatus(Long binderId, BinderStatus newStatus) {
         ExhibitBinder binder = findBinderById(binderId);
@@ -212,8 +187,6 @@ public class ExhibitBinderService {
                 });
     }
 
-    // --- Helper Validation & Mapping Methods ---
-
     private ExhibitBinder findBinderById(Long id) {
         return binderRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Exhibit binder not found with ID: " + id));
@@ -248,6 +221,7 @@ public class ExhibitBinderService {
                 .caseNumber(binder.getLegalCase().getCaseNumber())
                 .name(binder.getBinderName())
                 .batesPrefix(binder.getBatesPrefix())
+                .status(binder.getStatus())
                 .totalExhibits(exhibits.size())
                 .totalPages(totalPages)
                 .isLocked(isLocked)

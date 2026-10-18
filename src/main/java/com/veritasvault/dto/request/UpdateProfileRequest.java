@@ -7,9 +7,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Request payload to update authenticated user profile details.
- */
 @Data
 @Builder
 @NoArgsConstructor
