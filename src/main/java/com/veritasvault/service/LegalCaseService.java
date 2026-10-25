@@ -91,7 +91,7 @@ public class LegalCaseService {
 
     @Transactional(readOnly = true)
     public Page<CaseResponse> getCases(CaseStatus status, CaseType type, String search, User currentUser, Pageable pageable) {
-        String query = (search != null && !search.isBlank()) ? search.trim() : null;
+        String query = (search != null && !search.isBlank()) ? search.trim() : "";
 
         if (currentUser != null && currentUser.getRole() == Role.ROLE_CLIENT) {
             return legalCaseRepository.searchCasesByClient(currentUser.getId(), status, type, query, pageable)

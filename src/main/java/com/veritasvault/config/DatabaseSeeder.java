@@ -31,6 +31,8 @@ public class DatabaseSeeder implements CommandLineRunner {
     private final LegalCaseRepository legalCaseRepository;
     private final EvidenceItemRepository evidenceItemRepository;
     private final ChainOfCustodyLogRepository custodyLogRepository;
+    private final com.veritasvault.repository.CustodyReservationRepository reservationRepository;
+    private final com.veritasvault.repository.ForensicLabReportRepository labReportRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -132,5 +134,29 @@ public class DatabaseSeeder implements CommandLineRunner {
                 .build();
 
         custodyLogRepository.save(initialLog);
+
+        // 5. Seed Benchmark Completed Forensic Custody Reservation & Lab Report
+        com.veritasvault.model.CustodyReservation seedReservation = com.veritasvault.model.CustodyReservation.builder()
+                .evidenceItem(savedEvidence)
+                .examiner(savedExaminer)
+                .startTime(LocalDateTime.now().minusDays(1).withHour(9).withMinute(0))
+                .endTime(LocalDateTime.now().minusDays(1).withHour(11).withMinute(0))
+                .status(ReservationStatus.COMPLETED)
+                .notes("Completed forensic extraction and cryptographic hash audit.")
+                .build();
+        com.veritasvault.model.CustodyReservation savedReservation = reservationRepository.save(seedReservation);
+
+        com.veritasvault.model.ForensicLabReport seedReport = com.veritasvault.model.ForensicLabReport.builder()
+                .custodyReservation(savedReservation)
+                .evidenceItem(savedEvidence)
+                .examiner(savedExaminer)
+                .preExamHash(sampleSha256)
+                .postExamHash(sampleSha256)
+                .integrityStatus(LabIntegrityStatus.VERIFIED)
+                .examinerFindings("Full physical Cellebrite UFED image extraction verified against original media. Zero bit-rot or byte variance detected.")
+                .verifiedByThread("lab-verifier-pool-1")
+                .verificationDurationMs(142L)
+                .build();
+        labReportRepository.save(seedReport);
     }
 }

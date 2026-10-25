@@ -129,4 +129,15 @@ public class EvidenceController {
         EvidenceResponse response = evidenceService.updateStatus(id, newStatus, notes, currentUserId);
         return ResponseEntity.ok(response);
     }
+
+    @Operation(summary = "Simulate physical file tampering (Demo endpoint)",
+               description = "Appends a tamper byte to the physical file in uploads storage to test cryptographic mismatch detection during lab checkin")
+    @ApiResponse(responseCode = "200", description = "Tampering successfully simulated")
+    @ApiResponse(responseCode = "404", description = "Evidence not found")
+    @PostMapping("/{id}/simulate-tamper")
+    @PreAuthorize("hasAnyRole('ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
+    public ResponseEntity<String> simulateTamper(@PathVariable Long id) {
+        evidenceService.simulateTampering(id);
+        return ResponseEntity.ok("Tampering simulated: physical file byte modified on disk.");
+    }
 }

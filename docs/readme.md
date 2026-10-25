@@ -1,375 +1,161 @@
-
-
-Project 2:
-
-Digital Evidence Vault & Chain-of-Custody Managment System
-
-1. users
-
-id: PK
-
-full_name
-
-email
-
-password_hash
-
-role
-
-status
-
-profile_picture_url
-
-is_email_verified
-
-verification_token
-
-verification_token_expiry
-
-password_reset_token
-
-password_reset_token_expiry
-
-created_at
-
-updated_at
-
-2. legal_cases
-
-id: PK
-
-case_number
-
-case_title
-
-case_type
-
-lead_attorney_id: FK
-
-client_id: FK
-
-opposing_party_name
-
-opposing_counsel_name
-
-opposing_counsel_email
-
-status
-
-created_at
-
-updated_at
-
-3. evidence_items
-
-id: PK
-
-case_id: FK
-
-item_tracking_code
-
-name
-
-description
-
-evidence_type
-
-source_origin
-
-seizing_officer_name
-
-officer_badge_number
-
-law_enforcement_agency
-
-police_incident_report_num
-
-storage_url
-
-file_size_bytes
-
-sha256_hash
-
-status
-
-uploaded_by_user_id: FK
-
-created_at
-
-updated_at
-
-4. chain_of_custody_logs
-
-id: PK
-
-evidence_id: FK
-
-actor_user_id: FK
-
-action_type
-
-notes
-
-hash_at_event
-
-logged_at
-
-5. custody_reservations
-
-id: PK
-
-evidence_id: FK
-
-examiner_id: FK
-
-start_time
-
-end_time
-
-status
-
-notes
-
-created_at
-
-updated_at
-
-6. exhibit_binders
-
-id: PK
-
-case_id: FK
-
-binder_name
-
-bates_prefix
-
-status
-
-created_by_user_id: FK
-
-created_at
-
-updated_at
-
-7. binder_exhibits
-
-id: PK
-
-binder_id: FK
-
-evidence_id: FK
-
-exhibit_number
-
-bates_start_num
-
-bates_end_num
-
-added_at
-
-8. discovery_productions
-
-id: PK
-
-case_id: FK
-
-binder_id: FK
-
-target_party_name
-
-access_token
-
-download_password_hash
-
-is_watermarked
-
-expires_at
-
-created_by_user_id: FK
-
-created_at
-
-9. discovery_access_logs
-
-id: PK
-
-production_id: FK
-
-ip_address
-
-user_agent
-
-downloaded_file_name
-
-accessed_at
-
-
-
-
-1.) Users--> legal cases
-
-one user can have many legal cases
-
-
-for example :
-
-legal_cases.lead_attorney_id --> user.id
-
-legal_cases.client_id --> users.id
-
-one lead attorny can manage many legal cases
-
-one client can have one or more legal cases assigned to them
-
-
-why the reason for the users type to authorize who can read and who can edit and upload accordingly
-
-
-2.) legal_cases --> evidence_items(one to many)
-
-Foreign key: evidnece_items.case_id --> legal_cases.id
-
-one legal case contains many evidence items each peice of evidence belongs to one case
-many evidence to a case connected throught the case id to connected to the evidenct item.case id
-
-
-
-STILL UNDERCOSIDERATIONS!!!
-
-
-
-anything uploaded to the evidence depends on the user type for example a clinet may have limited upload capacity and some may have other privilages still under consideration
-
-
-
-
-
-
-3.) evidence_items --> chain_of_custody_logs
-
-one to many relationship
-
-chain_id --> evidence_id
-
-
-one piece of evidence accumulates many chronological log entires over time .
-
-this piece of evidence can be used for checking again and again reexamine and to be used so the many happens here
-
-
-4.) evidence_items --> custody_reservations
-
-custody_id--> evidence_id
-
-custody_reservations.examiner_id --> users.id
-
-one piece of evidence can have multiple scheduled checkout reservations over its lifetime
-example bookekd for analysis or booked for another thing in another day and so on
-
-
-
-
-5.) Legal_cases --> exhibit binders
-
-one to many relationship
-
-one case can have multiple exhibits created for different hearings
-
-example : a single lawsuit might require a bail hearing  binder a motion to suppress binder and final trial binder
-all of these belong to the same case
-
-
-6.) exhibit_binder --> evidence_items via binder_exhibits
-
-FK binder_exhibits:
-
-binder_exhibits.binder_id --> exhibit_binders.id
-
-binder_exhibits.evidence_id --> evidence_items.id
-
-many_to_many
-
-why is it important it holds join table .it holds extra metadata specific
-
-
-7.) exhibit_binders--> discorvery_production
-
-FK
-
-binder_exhibits.binder_id --> exhibit_binders.id
-
-binder_exhibits.evidence_id --> evidence_items.id
-
-relationship one finalized binder can be packaged into one or more discovery production sent to externak parties.
-
-why it matters : when an attorny finalizes an exhibit binder, they create a production package it generates an expiring URL token for the opposing counsel to download those exhibits without giving them an internal login account
-
-
-8.) discovery_productions --> discovery_access_logs
-
-FK : discovery_access_logs.production_id --> discovery_profduction.id
-
-Relationship: one discovery production package can have multiple download events logged against it
-
-why it matters:
-every time the opposing counsel clicks the download link. a new row inserted into this table recording their IP address 
-
-
-
-Roles and UserStatus
-
-Roles.java and UserStatus.java
-
-in our database schema a user cant just be anything .they must be one of four specific roles and there status active and inactive
-
-For the soft delete part we dont want to delete any user from the system because of missing record and name form the databse would cause problems
-
-so we inactivate it
-
-there logs remain in there but the user is incative
-solved the soft delete by the roles 
-
-
-Configurations File
-
-This is our master configuration file
-
-this contains settings common to all enviroments and tells spring which active profile to load
-
-1.)application.yml
-
-
-this is used to for running the application locally
-
-
-2.)application-dev.yml
-
-
-to check the working of the logic
-without touching our actual database correct.
-
-3.)application-test.yml
-
-
-
-login and verification
-
-JWT (JSON Web Token)
-
-lets think of JWT authentication like getting an entry card to an exclusive event.
-
-1.) login(show id): you present you email and password to the front desk
-which in our code is (/auth/users/login).
-
-2.) Verification & issuance : the desk confirms your identity against the database, stamps unforgettable ,tamper proof writsband with your identity and roles  JWT String
-
-3.) Subsequent Visits: you dont need to reverify each time you do a request you use you card to verify you dont need to reenter your password Authorization : Bearer,<token>
-
-4.) Door Security Check :we check the wristband no expired not tampered with if not 401 will appear
-
-
-
-
-
-
+# VeritasVault - Digital Evidence Vault & Chain of Custody Management System
+
+VeritasVault is an enterprise-grade digital and physical evidence management system engineered for law firms, district attorney offices, and forensic laboratories. It enforces strict compliance with **Federal Rule of Evidence 901** by maintaining an immutable, append-only chain of custody ledger and applying automated cryptographic verification across the evidentiary lifecycle.
+
+---
+
+## Complete Database Schema (10 Tables)
+
+### 1. `users`
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `full_name`: Varchar(150), Not Null
+* `email`: Varchar(100), Unique, Not Null
+* `password_hash`: Varchar(255), Not Null
+* `role`: Enum (`ROLE_ADMIN`, `ROLE_ATTORNEY`, `ROLE_FORENSIC_EXAMINER`, `ROLE_CLIENT`)
+* `status`: Enum (`ACTIVE`, `INACTIVE`, `SUSPENDED`)
+* `profile_picture_url`: Varchar(255)
+* `is_email_verified`: Boolean, Default False
+* `verification_token`: Varchar(255)
+* `verification_token_expiry`: Timestamp
+* `password_reset_token`: Varchar(255)
+* `password_reset_token_expiry`: Timestamp
+* `organization_or_agency`: Varchar(150)
+* `bar_or_badge_number`: Varchar(50)
+* `phone_number`: Varchar(30)
+* `created_at` / `updated_at`: Timestamp
+
+### 2. `legal_cases`
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `case_number`: Varchar(50), Unique, Not Null (e.g., `CV-2026-0042`)
+* `case_title`: Varchar(255), Not Null
+* `case_type`: Enum (`CRIMINAL`, `CIVIL`, `CORPORATE`, `FAMILY`, `PROBATE`)
+* `lead_attorney_id`: Foreign Key (`users.id`), Not Null
+* `client_id`: Foreign Key (`users.id`), Nullable
+* `opposing_party_name`: Varchar(150)
+* `opposing_counsel_name`: Varchar(150)
+* `opposing_counsel_email`: Varchar(100)
+* `status`: Enum (`ACTIVE`, `PENDING_TRIAL`, `CLOSED`, `ARCHIVED`)
+* `created_at` / `updated_at`: Timestamp
+
+### 3. `evidence_items`
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `case_id`: Foreign Key (`legal_cases.id`), Not Null
+* `item_tracking_code`: Varchar(50), Unique, Not Null (e.g., `EV-2026-0001`)
+* `name`: Varchar(200), Not Null
+* `description`: Text
+* `evidence_type`: Enum (`DIGITAL_IMAGE`, `DIGITAL_VIDEO`, `DIGITAL_DOCUMENT`, `PHYSICAL_OBJECT`, `FORENSIC_EXTRACTION`)
+* `source_origin`: Varchar(200)
+* `seizing_officer_name`: Varchar(150)
+* `officer_badge_number`: Varchar(50)
+* `law_enforcement_agency`: Varchar(150)
+* `police_incident_report_num`: Varchar(100)
+* `storage_url`: Varchar(255), Not Null
+* `file_size_bytes`: BigInt
+* `sha256_hash`: Varchar(64), Not Null
+* `status`: Enum (`INGESTED`, `AVAILABLE`, `RESERVED`, `IN_LAB`, `STAMPED`, `SEQUESTERED`, `ADMITTED`)
+* `uploaded_by_user_id`: Foreign Key (`users.id`), Not Null
+* `created_at` / `updated_at`: Timestamp
+
+### 4. `chain_of_custody_logs`
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `evidence_id`: Foreign Key (`evidence_items.id`), Not Null
+* `actor_user_id`: Foreign Key (`users.id`), Not Null
+* `action_type`: Enum (`INGEST`, `CHECK_OUT`, `CHECK_IN`, `COURT_SUBMISSION`, `ANALYZE`, `REDACT`)
+* `notes`: Text
+* `hash_at_event`: Varchar(64), Not Null
+* `logged_at`: Timestamp, Not Null
+
+### 5. `custody_reservations`
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `evidence_id`: Foreign Key (`evidence_items.id`), Not Null
+* `examiner_id`: Foreign Key (`users.id`), Not Null
+* `start_time`: Timestamp, Not Null
+* `end_time`: Timestamp, Not Null
+* `status`: Enum (`PENDING`, `CONFIRMED`, `ACTIVE`, `COMPLETED`, `CANCELLED`)
+* `notes`: Text
+* `created_at` / `updated_at`: Timestamp
+
+### 6. `forensic_lab_reports` *(10th Table - Unit 3 Multithreading & Verification)*
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `reservation_id`: Foreign Key (`custody_reservations.id`), Unique, Not Null
+* `evidence_id`: Foreign Key (`evidence_items.id`), Not Null
+* `examiner_id`: Foreign Key (`users.id`), Not Null
+* `pre_exam_hash`: Varchar(64), Not Null
+* `post_exam_hash`: Varchar(64), Not Null
+* `integrity_status`: Enum (`VERIFIED`, `COMPROMISED`)
+* `thread_name`: Varchar(100), Not Null (e.g., `lab-verifier-pool-1`)
+* `verification_duration_ms`: BigInt, Not Null
+* `findings_summary`: Text
+* `verified_at`: Timestamp, Not Null
+
+### 7. `exhibit_binders`
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `case_id`: Foreign Key (`legal_cases.id`), Not Null
+* `binder_name`: Varchar(150), Not Null
+* `bates_prefix`: Varchar(30), Not Null (e.g., `STATE-V-DOE`)
+* `status`: Enum (`DRAFT`, `FINALIZED`, `SERVED`)
+* `created_by_user_id`: Foreign Key (`users.id`), Not Null
+* `created_at` / `updated_at`: Timestamp
+
+### 8. `binder_exhibits`
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `binder_id`: Foreign Key (`exhibit_binders.id`), Not Null
+* `evidence_id`: Foreign Key (`evidence_items.id`), Not Null
+* `exhibit_number`: Varchar(30), Not Null (e.g., `Exhibit A`)
+* `bates_start_num`: Integer, Not Null
+* `bates_end_num`: Integer, Not Null
+* `added_at`: Timestamp, Not Null
+
+### 9. `discovery_productions`
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `case_id`: Foreign Key (`legal_cases.id`), Not Null
+* `binder_id`: Foreign Key (`exhibit_binders.id`), Not Null
+* `target_party_name`: Varchar(150), Not Null
+* `access_token`: Varchar(255), Not Null
+* `access_token_hash`: Varchar(64), Not Null
+* `is_watermarked`: Boolean, Default True
+* `expires_at`: Timestamp, Not Null
+* `created_by_user_id`: Foreign Key (`users.id`), Not Null
+* `created_at`: Timestamp
+
+### 10. `discovery_access_logs`
+* `id`: Primary Key (BigInt, Auto-Increment)
+* `production_id`: Foreign Key (`discovery_productions.id`), Not Null
+* `ip_address`: Varchar(50), Not Null
+* `user_agent`: Varchar(255), Not Null
+* `downloaded_file_name`: Varchar(200), Not Null
+* `accessed_at`: Timestamp, Not Null
+
+---
+
+## Entity Relationships & Architectural Principles
+
+1. **`users` ➔ `legal_cases` (One-to-Many):** One lead attorney manages multiple court cases; one client is associated with their own case docket. Client-scoped queries guarantee strict attorney-client data isolation.
+2. **`legal_cases` ➔ `evidence_items` (One-to-Many):** Evidence is strictly anchored to its parent case docket. Cross-case evidence contamination is structurally prevented.
+3. **`evidence_items` ➔ `chain_of_custody_logs` (One-to-Many):** Every evidence item maintains an unbroken, append-only chronological ledger of every handler, action, and cryptographic SHA-256 hash.
+4. **`evidence_items` ➔ `custody_reservations` (One-to-Many):** Examiners reserve time intervals for forensic examination. Protected by pessimistic database locks (`SELECT ... FOR UPDATE`) to block simultaneous booking race conditions.
+5. **`custody_reservations` ➔ `forensic_lab_reports` (One-to-One):** Check-in dispatches a background task to a dedicated 4-worker thread pool (`ExecutorService`). Before-and-after hashes are compared; tampered evidence is quarantined as `SEQUESTERED`.
+6. **`legal_cases` ➔ `exhibit_binders` (One-to-Many):** A case can contain multiple trial binders (e.g., Bail Hearing, Motion to Suppress, Trial).
+7. **`exhibit_binders` ➔ `evidence_items` via `binder_exhibits` (Many-to-Many):** Enforces continuous Bates page numbering across exhibits with automatic re-indexing when exhibits are removed.
+8. **`exhibit_binders` ➔ `discovery_productions` (One-to-Many):** Finalized binders are served to external opposing parties via secure, time-expiring UUID download tokens.
+9. **`discovery_productions` ➔ `discovery_access_logs` (One-to-Many):** Every download logs IP address and browser User-Agent, providing legally admissible proof of service.
+
+---
+
+## Security Model & Soft Deletion
+
+* **Role-Based Access Control (RBAC):**
+  * `ROLE_ADMIN`: Complete vault governance, user creation, and status management.
+  * `ROLE_ATTORNEY`: Case creation, exhibit binder curation, and discovery production.
+  * `ROLE_FORENSIC_EXAMINER`: Lab reservations, evidence checkout, and forensic check-in verification.
+  * `ROLE_CLIENT`: Read-only access restricted strictly to their assigned legal cases.
+* **Soft Deletions:**
+  * User accounts are never purged from PostgreSQL because historic chain-of-custody logs require persistent foreign keys to identify past handlers. Deactivation sets `status = INACTIVE` or `SUSPENDED`, terminating login capabilities while preserving evidentiary provenance.
+
+---
+
+## Application Profiles & Configuration
+
+* **`application.yml`**: Master configuration setting active profile, port (`8085`), storage paths (`uploads/`), and JWT secret keys.
+* **`application-dev.yml`**: Local development profile configured for PostgreSQL database persistence and SMTP relays.
+* **`application-test.yml`**: In-memory H2 database profile with isolated file systems for fast, reproducible unit and concurrency testing.

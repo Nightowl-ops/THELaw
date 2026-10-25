@@ -106,4 +106,19 @@ public class FileStorageService {
             // Ignore deletion failures during cleanup
         }
     }
+
+    public void appendTamperByte(String relativePath) {
+        if (!StringUtils.hasText(relativePath)) {
+            return;
+        }
+
+        try {
+            Path filePath = this.rootStorageLocation.resolve(relativePath).normalize();
+            if (Files.exists(filePath) && filePath.startsWith(this.rootStorageLocation)) {
+                Files.write(filePath, "\n[TAMPERED_BYTE_IN_LAB]".getBytes(), java.nio.file.StandardOpenOption.APPEND);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to simulate tampering on: " + relativePath, e);
+        }
+    }
 }

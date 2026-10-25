@@ -25,7 +25,7 @@ public class AdminUserService {
 
     @Transactional(readOnly = true)
     public Page<UserProfileResponse> getUsers(Role role, UserStatus status, String search, Pageable pageable) {
-        String query = (search != null && !search.isBlank()) ? search.trim() : null;
+        String query = (search != null && !search.isBlank()) ? search.trim() : "";
         return userRepository.searchUsers(role, status, query, pageable)
                 .map(authService::mapToProfileResponse);
     }

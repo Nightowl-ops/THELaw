@@ -61,10 +61,13 @@ An append-only, tamper-evident chronological ledger. Records:
 ### 5. Lab Workstation Reservations (`custody_reservations`)
 Prevents two examiners from booking or analyzing the same piece of physical evidence simultaneously. Enforces interval overlap checks and pessimistic row locking.
 
-### 6. Trial Exhibit Binders & Bates Stamping (`exhibit_binders`, `binder_exhibits`)
+### 6. Forensic Lab Reports & Tamper Verification (`forensic_lab_reports`) - *10th Table*
+Dispatches background verification tasks to a dedicated 4-worker thread pool (`lab-verifier-pool-1` to `4`). Calculates and compares post-examination SHA-256 hashes against baseline hashes. If tampering is detected, the item is immediately quarantined in `SEQUESTERED` status, preserving digital proof for court testimony.
+
+### 7. Trial Exhibit Binders & Bates Stamping (`exhibit_binders`, `binder_exhibits`)
 Allows attorneys to assemble trial bundles from admitted evidence. Implements consecutive Bates numbering (e.g., `PLTF-000001` to `PLTF-000045`). Once marked `FINALIZED` or `SERVED`, binders are permanently locked against modifications. If an exhibit is deleted in draft status, the entire sequence is automatically re-indexed so no Bates gaps exist.
 
-### 7. Discovery Productions & Proof of Service (`discovery_productions`, `discovery_access_logs`)
+### 8. Discovery Productions & Proof of Service (`discovery_productions`, `discovery_access_logs`)
 Manages formal productions served on opposing counsel. Instead of storing plaintext URLs, the database stores an **access token hash (`accessTokenHash`)**. Opposing counsel downloads the bundled evidence through `GET /api/discovery/download/{accessToken}`, which verifies the expiration window, access count limit, and logs a tamper-proof timestamped download receipt (Proof of Service).
 
 ---
@@ -125,7 +128,9 @@ Modular domain documentation is maintained inside the [`docs/`](./docs) director
 | **05** | [**Lab Reservations & SSE**](./docs/05-lab-reservations-and-sse.md) | Workstation double-booking collision engine and real-time SSE event broadcasts. |
 | **06** | [**Exhibit Binders & Bates**](./docs/06-binders-and-bates.md) | Trial binder bundling, consecutive page Bates offset calculations, and immutability locks. |
 | **07** | [**Discovery Production**](./docs/07-discovery-production.md) | Token-gated opposing counsel disclosures, link expiration, and Proof of Service access logging. |
-| **Ref** | [**REST API Reference**](./docs/REST-API-Reference.md) | Endpoint specifications, HTTP request formats, and query parameters. |
+| **08** | [**Unit 3 Concurrency & Threads**](./docs/08-unit3-concurrency-and-threads.md) | 4-worker ExecutorService thread pool, parallel verification, 10th table, and tamper quarantine. |
+| **Stories** | [**User Stories & Acceptance**](./docs/user-stories.md) | Agile requirements, acceptance criteria, and operational personas. |
+| **Ref** | [**REST API Reference**](./docs/REST-API-Reference.md) | Complete endpoint specifications, HTTP request formats, and query parameters (Port 8085). |
 | **Ext** | [**Credits & External Resources**](./docs/Credits%20&%20External%20Resources.md) | Legal research citations, statutory rules of evidence, and design inspirations. |
 
 ---

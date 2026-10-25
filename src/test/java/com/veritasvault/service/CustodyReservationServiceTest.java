@@ -15,6 +15,7 @@ import com.veritasvault.model.enums.Role;
 import com.veritasvault.repository.ChainOfCustodyLogRepository;
 import com.veritasvault.repository.CustodyReservationRepository;
 import com.veritasvault.repository.EvidenceItemRepository;
+import com.veritasvault.repository.ForensicLabReportRepository;
 import com.veritasvault.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -48,6 +49,10 @@ class CustodyReservationServiceTest {
     private ChainOfCustodyLogRepository custodyLogRepository;
     @Mock
     private NotificationService notificationService;
+    @Mock
+    private ForensicLabReportRepository labReportRepository;
+    @Mock
+    private FileStorageService fileStorageService;
 
     @InjectMocks
     private CustodyReservationService reservationService;
@@ -280,6 +285,7 @@ class CustodyReservationServiceTest {
         when(reservationRepository.findById(400L)).thenReturn(Optional.of(reservation));
         when(userRepository.findById(10L)).thenReturn(Optional.of(examiner));
         when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(labReportRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         CustodyReservationResponse response = reservationService.checkInEvidence(400L, "Analysis completed cleanly", 10L);
 
@@ -292,5 +298,36 @@ class CustodyReservationServiceTest {
                         log.getEvidenceItem().getId().equals(100L)
         ));
         verify(notificationService, times(1)).broadcast(eq("EVIDENCE_CHECKED_IN"), any());
+    }
+
+    @Test
+    @DisplayName("Should generate ForensicLabReport with verified status and multithreading telemetry on check-in")
+    void checkInWithLabReport_Success() {
+        evidence.setStatus(EvidenceStatus.IN_LAB);
+        CustodyReservation reservation = CustodyReservation.builder()
+                .id(450L)
+                .evidenceItem(evidence)
+                .examiner(examiner)
+                .status(ReservationStatus.ACTIVE)
+                .build();
+
+        when(reservationRepository.findById(450L)).thenReturn(Optional.of(reservation));
+        when(userRepository.findById(10L)).thenReturn(Optional.of(examiner));
+        when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(labReportRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        com.veritasvault.dto.request.CreateLabReportRequest request = com.veritasvault.dto.request.CreateLabReportRequest.builder()
+                .examinerFindings("Microfilm analysis completed without tampering")
+                .notes("All frames intact")
+                .build();
+
+        com.veritasvault.dto.response.ForensicLabReportResponse reportResponse =
+                reservationService.checkInWithLabReport(450L, request, 10L);
+
+        assertThat(reportResponse).isNotNull();
+        assertThat(reportResponse.getIntegrityStatus()).isEqualTo(com.veritasvault.model.enums.LabIntegrityStatus.VERIFIED);
+        assertThat(reportResponse.getVerifiedByThread()).startsWith("lab-verifier-pool-");
+        assertThat(reportResponse.getExaminerFindings()).contains("Microfilm analysis");
+        assertThat(evidence.getStatus()).isEqualTo(EvidenceStatus.AVAILABLE);
     }
 }

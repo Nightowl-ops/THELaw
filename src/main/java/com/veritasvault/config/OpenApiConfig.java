@@ -10,10 +10,6 @@ import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/**
- * OpenAPI 3 / Swagger documentation configuration.
- * Configures global JWT Bearer authentication scheme across the interactive Swagger UI.
- */
 @Configuration
 public class OpenApiConfig {
 

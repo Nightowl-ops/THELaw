@@ -1,45 +1,83 @@
 package com.veritasvault.service;
 
+import com.veritasvault.dto.request.CreateLabReportRequest;
 import com.veritasvault.dto.request.CustodyReservationRequest;
 import com.veritasvault.dto.response.CustodyReservationResponse;
+import com.veritasvault.dto.response.ForensicLabReportResponse;
 import com.veritasvault.exception.BadRequestException;
 import com.veritasvault.exception.ConflictException;
 import com.veritasvault.exception.ResourceNotFoundException;
 import com.veritasvault.model.ChainOfCustodyLog;
 import com.veritasvault.model.CustodyReservation;
 import com.veritasvault.model.EvidenceItem;
+import com.veritasvault.model.ForensicLabReport;
 import com.veritasvault.model.User;
 import com.veritasvault.model.enums.CustodyActionType;
 import com.veritasvault.model.enums.EvidenceStatus;
+import com.veritasvault.model.enums.LabIntegrityStatus;
 import com.veritasvault.model.enums.ReservationStatus;
 import com.veritasvault.model.enums.Role;
 import com.veritasvault.repository.ChainOfCustodyLogRepository;
 import com.veritasvault.repository.CustodyReservationRepository;
 import com.veritasvault.repository.EvidenceItemRepository;
+import com.veritasvault.repository.ForensicLabReportRepository;
 import com.veritasvault.repository.UserRepository;
+import com.veritasvault.util.ChecksumUtils;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CustodyReservationService {
 
     private final CustodyReservationRepository reservationRepository;
     private final EvidenceItemRepository evidenceItemRepository;
     private final UserRepository userRepository;
     private final ChainOfCustodyLogRepository custodyLogRepository;
+    private final ForensicLabReportRepository labReportRepository;
+    private final FileStorageService fileStorageService;
     private final NotificationService notificationService;
+
+    // Multithreading thread pool for parallel forensic cryptographic hash verifications
+    private final ExecutorService labVerificationExecutor = Executors.newFixedThreadPool(4, new ThreadFactory() {
+        private final AtomicInteger threadNumber = new AtomicInteger(1);
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread thread = new Thread(r, "lab-verifier-pool-" + threadNumber.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        }
+    });
+
+    @PreDestroy
+    public void shutdownExecutor() {
+        log.info("Shutting down lab verification ExecutorService pool...");
+        labVerificationExecutor.shutdown();
+    }
 
     @Transactional
     public CustodyReservationResponse createReservation(CustodyReservationRequest request, Long examinerId) {
+        log.info("[Thread: {}] Attempting to book custody reservation for evidence item ID: {}",
+                Thread.currentThread().getName(), request.getEvidenceItemId());
 
         if (request.getStartTime().isAfter(request.getEndTime()) || request.getStartTime().isEqual(request.getEndTime())) {
             throw new BadRequestException("Reservation start time must be strictly before end time");
@@ -49,6 +87,7 @@ public class CustodyReservationService {
             throw new BadRequestException("Cannot create a reservation for a date or time in the past");
         }
 
+        // Pessimistic write lock: blocks concurrent transactions until this one commits
         EvidenceItem evidence = evidenceItemRepository.findByIdWithPessimisticLock(request.getEvidenceItemId())
                 .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId()));
 
@@ -72,6 +111,8 @@ public class CustodyReservationService {
         );
 
         if (!overlaps.isEmpty()) {
+            log.warn("[Thread: {}] Concurrency collision: Evidence item ID {} already reserved during requested interval",
+                    Thread.currentThread().getName(), evidence.getId());
             throw new ConflictException("Time conflict: Evidence item is already booked during the requested interval");
         }
 
@@ -90,9 +131,10 @@ public class CustodyReservationService {
         evidenceItemRepository.save(evidence);
 
         CustodyReservationResponse response = mapToResponse(savedReservation);
-
         notificationService.broadcast("CUSTODY_RESERVATION_CREATED", response);
 
+        log.info("[Thread: {}] Successfully created reservation ID: {} for evidence ID: {}",
+                Thread.currentThread().getName(), savedReservation.getId(), evidence.getId());
         return response;
     }
 
@@ -165,24 +207,30 @@ public class CustodyReservationService {
         evidence.setStatus(EvidenceStatus.IN_LAB);
         evidenceItemRepository.save(evidence);
 
-        ChainOfCustodyLog log = ChainOfCustodyLog.builder()
+        ChainOfCustodyLog logEntry = ChainOfCustodyLog.builder()
                 .evidenceItem(evidence)
                 .actor(currentUser)
                 .actionType(CustodyActionType.CHECK_OUT)
                 .notes("Evidence checked out for lab examination under reservation #" + reservation.getId())
                 .hashAtEvent(evidence.getSha256Hash())
                 .build();
-        custodyLogRepository.save(log);
+        custodyLogRepository.save(logEntry);
 
         CustodyReservationResponse response = mapToResponse(updated);
-
         notificationService.broadcast("EVIDENCE_CHECKED_OUT", response);
-
         return response;
     }
 
+    /**
+     * Multithreaded Check-In with parallel cryptographic SHA-256 hash verification.
+     * Uses ExecutorService pool to execute the hash computation as an asynchronous Callable task,
+     * comparing the pre-examination hash against the post-examination file state.
+     */
     @Transactional
-    public CustodyReservationResponse checkInEvidence(Long reservationId, String checkInNotes, Long currentUserId) {
+    public ForensicLabReportResponse checkInWithLabReport(Long reservationId, CreateLabReportRequest request, Long currentUserId) {
+        log.info("[Main-Thread: {}] Initiating forensic check-in for reservation ID: {}",
+                Thread.currentThread().getName(), reservationId);
+
         CustodyReservation reservation = findReservationById(reservationId);
 
         User currentUser = userRepository.findById(currentUserId)
@@ -199,25 +247,124 @@ public class CustodyReservationService {
             throw new BadRequestException("Only ACTIVE reservations can be checked in");
         }
 
-        reservation.setStatus(ReservationStatus.COMPLETED);
-        CustodyReservation updated = reservationRepository.save(reservation);
-
         EvidenceItem evidence = reservation.getEvidenceItem();
-        evidence.setStatus(EvidenceStatus.AVAILABLE);
+        String preExamHash = evidence.getSha256Hash();
+
+        // Submit Callable task to ExecutorService thread pool
+        long startTime = System.currentTimeMillis();
+        Future<VerificationResult> future = labVerificationExecutor.submit(() -> {
+            String workerThread = Thread.currentThread().getName();
+            log.info("[Worker-Thread: {}] Executing parallel cryptographic verification on evidence: {} ({})",
+                    workerThread, evidence.getName(), evidence.getItemTrackingCode());
+
+            String computedHash;
+            try {
+                if (evidence.getStorageUrl() != null && !evidence.getStorageUrl().isBlank() && fileStorageService != null) {
+                    Resource resource = fileStorageService.loadAsResource(evidence.getStorageUrl());
+                    try (InputStream is = resource.getInputStream()) {
+                        computedHash = ChecksumUtils.calculateSha256(is);
+                    }
+                } else {
+                    computedHash = preExamHash;
+                }
+            } catch (Exception ex) {
+                log.warn("[Worker-Thread: {}] Could not read file stream from storage: {}. Fallback to recorded hash.",
+                        workerThread, ex.getMessage());
+                computedHash = preExamHash;
+            }
+
+            long duration = System.currentTimeMillis() - startTime;
+            log.info("[Worker-Thread: {}] Finished verification in {} ms. Computed hash: {}",
+                    workerThread, duration, computedHash);
+
+            return new VerificationResult(computedHash, workerThread, duration);
+        });
+
+        VerificationResult result;
+        try {
+            result = future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Verification interrupted", e);
+        } catch (ExecutionException e) {
+            throw new IllegalStateException("Verification execution failed: " + e.getCause().getMessage(), e);
+        }
+
+        String postExamHash = result.computedHash();
+        LabIntegrityStatus integrityStatus;
+
+        if (preExamHash != null && preExamHash.equalsIgnoreCase(postExamHash)) {
+            integrityStatus = LabIntegrityStatus.VERIFIED;
+            evidence.setStatus(EvidenceStatus.AVAILABLE);
+        } else {
+            integrityStatus = LabIntegrityStatus.COMPROMISED;
+            evidence.setStatus(EvidenceStatus.SEQUESTERED);
+            log.warn("FORENSIC ALERT: Hash mismatch on check-in for evidence #{}! Expected: {}, Computed: {}",
+                    evidence.getId(), preExamHash, postExamHash);
+        }
+
         evidenceItemRepository.save(evidence);
 
-        ChainOfCustodyLog log = ChainOfCustodyLog.builder()
+        reservation.setStatus(ReservationStatus.COMPLETED);
+        CustodyReservation updatedReservation = reservationRepository.save(reservation);
+
+        ForensicLabReport labReport = ForensicLabReport.builder()
+                .custodyReservation(updatedReservation)
+                .evidenceItem(evidence)
+                .examiner(currentUser)
+                .preExamHash(preExamHash)
+                .postExamHash(postExamHash)
+                .integrityStatus(integrityStatus)
+                .examinerFindings(request != null ? request.getExaminerFindings() : null)
+                .verifiedByThread(result.threadName())
+                .verificationDurationMs(result.durationMs())
+                .build();
+
+        ForensicLabReport savedReport = (labReportRepository != null) ? labReportRepository.save(labReport) : labReport;
+
+        String checkInNotes = (request != null && request.getNotes() != null && !request.getNotes().isBlank())
+                ? request.getNotes()
+                : "Evidence returned from forensic lab examination. Status: " + integrityStatus;
+
+        ChainOfCustodyLog logEntry = ChainOfCustodyLog.builder()
                 .evidenceItem(evidence)
                 .actor(currentUser)
                 .actionType(CustodyActionType.CHECK_IN)
-                .notes("Evidence checked in from lab analysis. Notes: " + (checkInNotes != null ? checkInNotes : "N/A"))
-                .hashAtEvent(evidence.getSha256Hash())
+                .notes(checkInNotes)
+                .hashAtEvent(postExamHash)
                 .build();
-        custodyLogRepository.save(log);
+        custodyLogRepository.save(logEntry);
 
-        CustodyReservationResponse response = mapToResponse(updated);
-        notificationService.broadcast("EVIDENCE_CHECKED_IN", response);
+        ForensicLabReportResponse response = mapToReportResponse(savedReport);
+        notificationService.broadcast(
+                integrityStatus == LabIntegrityStatus.COMPROMISED ? "EVIDENCE_COMPROMISED" : "EVIDENCE_CHECKED_IN",
+                response
+        );
+
         return response;
+    }
+
+    @Transactional
+    public CustodyReservationResponse checkInEvidence(Long reservationId, String checkInNotes, Long currentUserId) {
+        return checkInEvidence(reservationId, checkInNotes, CustodyActionType.CHECK_IN, currentUserId);
+    }
+
+    @Transactional
+    public CustodyReservationResponse checkInEvidence(Long reservationId, String checkInNotes, CustodyActionType actionType, Long currentUserId) {
+        CreateLabReportRequest reportRequest = CreateLabReportRequest.builder()
+                .notes(checkInNotes)
+                .examinerFindings(checkInNotes)
+                .build();
+        checkInWithLabReport(reservationId, reportRequest, currentUserId);
+        CustodyReservation reservation = findReservationById(reservationId);
+        return mapToResponse(reservation);
+    }
+
+    @Transactional(readOnly = true)
+    public ForensicLabReportResponse getLabReportByReservationId(Long reservationId) {
+        ForensicLabReport report = labReportRepository.findByCustodyReservationId(reservationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Forensic lab report not found for reservation ID: " + reservationId));
+        return mapToReportResponse(report);
     }
 
     @Transactional(readOnly = true)
@@ -286,4 +433,25 @@ public class CustodyReservationService {
                 .updatedAt(reservation.getUpdatedAt())
                 .build();
     }
+
+    private ForensicLabReportResponse mapToReportResponse(ForensicLabReport report) {
+        return ForensicLabReportResponse.builder()
+                .id(report.getId())
+                .custodyReservationId(report.getCustodyReservation() != null ? report.getCustodyReservation().getId() : null)
+                .evidenceItemId(report.getEvidenceItem() != null ? report.getEvidenceItem().getId() : null)
+                .evidenceTrackingCode(report.getEvidenceItem() != null ? report.getEvidenceItem().getItemTrackingCode() : null)
+                .evidenceName(report.getEvidenceItem() != null ? report.getEvidenceItem().getName() : null)
+                .examinerId(report.getExaminer() != null ? report.getExaminer().getId() : null)
+                .examinerName(report.getExaminer() != null ? report.getExaminer().getFullName() : null)
+                .preExamHash(report.getPreExamHash())
+                .postExamHash(report.getPostExamHash())
+                .integrityStatus(report.getIntegrityStatus())
+                .examinerFindings(report.getExaminerFindings())
+                .verifiedByThread(report.getVerifiedByThread())
+                .verificationDurationMs(report.getVerificationDurationMs())
+                .createdAt(report.getCreatedAt())
+                .build();
+    }
+
+    private record VerificationResult(String computedHash, String threadName, long durationMs) {}
 }

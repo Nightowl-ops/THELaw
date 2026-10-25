@@ -1,60 +1,104 @@
-# VeritasVault  REST API Reference
+# VeritasVault - REST API Reference
 
-Interactive Swagger Documentation: [http://localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html)
-
----
-
-### Authentication & Users
-1. POST Register User: [http://localhost:8080/api/auth/register](http://localhost:8080/api/auth/register)
-2. POST Login User: [http://localhost:8080/api/auth/login](http://localhost:8080/api/auth/login)
-3. GET Current User Profile: [http://localhost:8080/api/auth/me](http://localhost:8080/api/auth/me)
+* Base Server URL: `http://localhost:8085`
+* Interactive Swagger Documentation: [http://localhost:8085/swagger-ui/index.html](http://localhost:8085/swagger-ui/index.html)
+* OpenAPI JSON Specification: [http://localhost:8085/v3/api-docs](http://localhost:8085/v3/api-docs)
 
 ---
 
-### Legal Cases
-4. GET All Legal Cases: [http://localhost:8080/api/cases](http://localhost:8080/api/cases)
-5. POST Create Legal Case: [http://localhost:8080/api/cases](http://localhost:8080/api/cases)
-6. GET Legal Case By ID: [http://localhost:8080/api/cases/{caseId}](http://localhost:8080/api/cases/{caseId})
-7. PATCH Update Case Status: [http://localhost:8080/api/cases/{caseId}/status](http://localhost:8080/api/cases/{caseId}/status)
+### 1. Authentication & User Management
+| Method | Endpoint | Description | Access Tier |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/auth/register` | Self-register as new client user | Public |
+| `GET` | `/api/auth/verify?token={token}` | Confirm email using 24-hr token | Public |
+| `POST` | `/api/auth/login` | Authenticate and obtain JWT Bearer token | Public |
+| `POST` | `/api/auth/forgot-password` | Request password reset email | Public |
+| `POST` | `/api/auth/reset-password` | Reset password using 1-hr token | Public |
+| `POST` | `/api/auth/change-password` | Update password for current user | Authenticated |
+| `GET` | `/api/auth/me` | Fetch authenticated user profile | Authenticated |
+| `PUT` | `/api/auth/profile` | Update contact and professional credentials | Authenticated |
+| `POST` | `/api/auth/profile/picture` | Upload profile avatar (PNG/JPEG) | Authenticated |
+| `GET` | `/api/auth/profile/picture/{userId}` | Stream user profile picture resource | Authenticated |
 
 ---
 
-### Evidence Items
-8. POST Upload & Ingest Evidence: [http://localhost:8080/api/evidence/upload](http://localhost:8080/api/evidence/upload)
-9. GET Evidence By ID: [http://localhost:8080/api/evidence/{evidenceId}](http://localhost:8080/api/evidence/{evidenceId})
-10. GET All Evidence In Case: [http://localhost:8080/api/evidence/case/{caseId}](http://localhost:8080/api/evidence/case/{caseId})
-11. GET Download Evidence Binary: [http://localhost:8080/api/evidence/{evidenceId}/download](http://localhost:8080/api/evidence/{evidenceId}/download)
+### 2. Administrator Operations
+| Method | Endpoint | Description | Access Tier |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/admin/users` | Paginated search of all vault users | `ROLE_ADMIN` |
+| `POST` | `/api/admin/users` | Provision privileged account (`ATTORNEY`, `EXAMINER`, `ADMIN`) | `ROLE_ADMIN` |
+| `PATCH` | `/api/admin/users/{id}/status` | Activate or suspend user account | `ROLE_ADMIN` |
+| `PATCH` | `/api/admin/users/{id}/role` | Modify user authorization role | `ROLE_ADMIN` |
 
 ---
 
-### Custody Reservations
-12. POST Create Custody Reservation: [http://localhost:8080/api/custody/reservations](http://localhost:8080/api/custody/reservations)
-13. GET Custody Reservation By ID: [http://localhost:8080/api/custody/reservations/{reservationId}](http://localhost:8080/api/custody/reservations/{reservationId})
-14. GET Reservations By Evidence ID: [http://localhost:8080/api/custody/reservations/evidence/{evidenceId}](http://localhost:8080/api/custody/reservations/evidence/{evidenceId})
-15. GET Reservations By Examiner ID: [http://localhost:8080/api/custody/reservations/examiner/{examinerId}](http://localhost:8080/api/custody/reservations/examiner/{examinerId})
-16. POST Checkout Evidence (IN_LAB): [http://localhost:8080/api/custody/reservations/{reservationId}/checkout](http://localhost:8080/api/custody/reservations/{reservationId}/checkout)
-17. POST Checkin Evidence (AVAILABLE): [http://localhost:8080/api/custody/reservations/{reservationId}/checkin](http://localhost:8080/api/custody/reservations/{reservationId}/checkin)
-18. POST Cancel Custody Reservation: [http://localhost:8080/api/custody/reservations/{reservationId}/cancel](http://localhost:8080/api/custody/reservations/{reservationId}/cancel)
+### 3. Legal Cases
+| Method | Endpoint | Description | Access Tier |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/cases` | Paginated case search (client-scoped or firm-wide) | Authenticated |
+| `POST` | `/api/cases` | Open a new legal case docket | `ROLE_ATTORNEY`, `ROLE_ADMIN` |
+| `GET` | `/api/cases/{caseId}` | Fetch case details by ID | Authenticated |
+| `PATCH` | `/api/cases/{caseId}/status` | Update lifecycle (`ACTIVE`, `PENDING_TRIAL`, `CLOSED`) | `ROLE_ATTORNEY`, `ROLE_ADMIN` |
 
 ---
 
-### Chain of Custody Logs
-19. GET All Custody Logs For Evidence: [http://localhost:8080/api/custody/logs/evidence/{evidenceId}](http://localhost:8080/api/custody/logs/evidence/{evidenceId})
-20. GET Custody Log Entry By ID: [http://localhost:8080/api/custody/logs/{logId}](http://localhost:8080/api/custody/logs/{logId})
+### 4. Evidence Items & Forensic Vault
+| Method | Endpoint | Description | Access Tier |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/evidence/upload` | Ingest evidence file with SHA-256 calculation | Authenticated |
+| `GET` | `/api/evidence/{evidenceId}` | Fetch evidence metadata by numeric ID | Authenticated |
+| `GET` | `/api/evidence/tracking/{code}` | Fetch evidence by tracking code (`EV-YYYY-XXXX`) | Authenticated |
+| `GET` | `/api/evidence/case/{caseId}` | Paginated list of evidence in a case | Authenticated |
+| `GET` | `/api/evidence/{evidenceId}/download`| Stream raw evidence binary from storage | Authenticated |
+| `PATCH` | `/api/evidence/{evidenceId}/status` | Move evidence across legal finite-state machine | Authenticated |
+| `POST` | `/api/evidence/{evidenceId}/simulate-tamper` | Ingest corrupting byte for tamper demo | `ROLE_ADMIN`, `ROLE_FORENSIC_EXAMINER` |
 
 ---
 
-### Exhibit Binders
-21. GET All Exhibit Binders: [http://localhost:8080/api/binders](http://localhost:8080/api/binders)
-22. POST Create Exhibit Binder: [http://localhost:8080/api/binders](http://localhost:8080/api/binders)
-23. GET Exhibit Binder By ID: [http://localhost:8080/api/binders/{binderId}](http://localhost:8080/api/binders/{binderId})
-24. PATCH Update Binder Status: [http://localhost:8080/api/binders/{binderId}/status](http://localhost:8080/api/binders/{binderId}/status)
-25. POST Add Exhibit To Binder: [http://localhost:8080/api/binders/{binderId}/exhibits](http://localhost:8080/api/binders/{binderId}/exhibits)
-26. DELETE Remove Exhibit From Binder: [http://localhost:8080/api/binders/{binderId}/exhibits/{exhibitId}](http://localhost:8080/api/binders/{binderId}/exhibits/{exhibitId})
+### 5. Chain of Custody (Immutable Ledger)
+| Method | Endpoint | Description | Access Tier |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/custody/logs/evidence/{evidenceId}` | Get chronological, append-only custody timeline | Authenticated |
 
 ---
 
-### Discovery Productions & Logs
-27. POST Create Discovery Production: [http://localhost:8080/api/discovery/produce](http://localhost:8080/api/discovery/produce)
-28. GET Download Outbound Discovery Package: [http://localhost:8080/api/discovery/download/{rawAccessToken}](http://localhost:8080/api/discovery/download/{rawAccessToken})
-29. GET Discovery Delivery & Receipt Logs: [http://localhost:8080/api/discovery/{productionId}/receipts](http://localhost:8080/api/discovery/{productionId}/receipts)
+### 6. Custody Reservations & Multithreaded Lab Check-In
+| Method | Endpoint | Description | Access Tier |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/custody/reservations` | Reserve lab slot with pessimistic DB lock | `ROLE_FORENSIC_EXAMINER`, `ROLE_ADMIN` |
+| `GET` | `/api/custody/reservations/{id}` | Get reservation details | Authenticated |
+| `GET` | `/api/custody/reservations/evidence/{evidenceId}` | Get reservation schedule for evidence | Authenticated |
+| `GET` | `/api/custody/reservations/examiner/{examinerId}` | Get schedule for examiner | Authenticated |
+| `POST` | `/api/custody/reservations/{id}/checkout` | Check out evidence to bench (`IN_LAB`) | Assigned Examiner / Admin |
+| `POST` | `/api/custody/reservations/{id}/checkin` | **Unit 3**: Multithreaded SHA-256 verification & lab report | Assigned Examiner / Admin |
+| `GET` | `/api/custody/reservations/{id}/report` | Fetch 10th table forensic verification report | Authenticated |
+| `POST` | `/api/custody/reservations/{id}/cancel` | Cancel booking and release slot | Assigned Examiner / Admin |
+
+---
+
+### 7. Exhibit Binders & Bates Numbering
+| Method | Endpoint | Description | Access Tier |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/binders/case/{caseId}` | Fetch all binders for a case | Authenticated |
+| `POST` | `/api/binders` | Create new trial binder | `ROLE_ATTORNEY`, `ROLE_ADMIN` |
+| `GET` | `/api/binders/{binderId}` | Get binder with sequentially numbered exhibits | Authenticated |
+| `PATCH` | `/api/binders/{binderId}/status` | Transition status (`DRAFT`, `FINALIZED`, `SERVED`) | `ROLE_ATTORNEY`, `ROLE_ADMIN` |
+| `POST` | `/api/binders/{binderId}/exhibits` | Add exhibit with continuous Bates numbering | `ROLE_ATTORNEY`, `ROLE_ADMIN` |
+| `DELETE` | `/api/binders/{binderId}/exhibits/{exhibitId}` | Remove exhibit and trigger re-indexing cascade | `ROLE_ATTORNEY`, `ROLE_ADMIN` |
+
+---
+
+### 8. Discovery Productions & Access Receipts
+| Method | Endpoint | Description | Access Tier |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/discovery/produce` | Serve binder, hash UUID token, and lock binder | `ROLE_ATTORNEY`, `ROLE_ADMIN` |
+| `GET` | `/api/discovery/view/{token}` | Opposing counsel landing page preview | Public (Valid Token) |
+| `GET` | `/api/discovery/download/{token}` | Download discovery bundle and log IP receipt | Public (Valid Token) |
+| `GET` | `/api/discovery/{productionId}/receipts` | Fetch certified Proof of Service audit logs | `ROLE_ATTORNEY`, `ROLE_ADMIN` |
+
+---
+
+### 9. Real-Time Telemetry Streaming
+| Method | Endpoint | Description | Access Tier |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/notifications/subscribe` | Open persistent Server-Sent Events (SSE) telemetry stream | Authenticated |

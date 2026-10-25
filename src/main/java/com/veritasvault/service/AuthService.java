@@ -22,6 +22,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -207,6 +208,18 @@ public class AuthService {
 
         User updated = userRepository.save(user);
         return mapToProfileResponse(updated);
+    }
+
+    @Transactional(readOnly = true)
+    public Resource loadProfilePicture(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+
+        if (user.getProfilePictureUrl() == null || user.getProfilePictureUrl().isBlank()) {
+            throw new ResourceNotFoundException("No profile picture uploaded for user ID: " + userId);
+        }
+
+        return fileStorageService.loadAsResource(user.getProfilePictureUrl());
     }
 
     public UserProfileResponse mapToProfileResponse(User user) {

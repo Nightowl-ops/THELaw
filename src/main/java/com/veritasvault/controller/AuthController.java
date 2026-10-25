@@ -15,6 +15,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -137,5 +139,40 @@ public class AuthController {
         Long currentUserId = userDetails.getUser().getId();
         UserProfileResponse response = authService.updateProfilePicture(file, currentUserId);
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Get user profile picture", description = "Streams the profile picture for the specified user ID")
+    @ApiResponse(responseCode = "200", description = "Profile picture image stream")
+    @ApiResponse(responseCode = "404", description = "User or picture not found")
+    @GetMapping("/users/{userId}/picture")
+    public ResponseEntity<Resource> getUserProfilePicture(@PathVariable Long userId) {
+        Resource resource = authService.loadProfilePicture(userId);
+        MediaType mediaType = determineMediaType(resource.getFilename());
+
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "max-age=3600, must-revalidate")
+                .body(resource);
+    }
+
+    @Operation(summary = "Get current user profile picture", description = "Streams the profile picture for the authenticated user")
+    @ApiResponse(responseCode = "200", description = "Profile picture image stream")
+    @ApiResponse(responseCode = "404", description = "Picture not found")
+    @GetMapping("/profile/picture")
+    public ResponseEntity<Resource> getCurrentUserProfilePicture(@AuthenticationPrincipal MyUserDetails userDetails) {
+        if (userDetails == null || userDetails.getUser() == null) {
+            throw new AccessDeniedException("Full authentication is required to access this resource");
+        }
+        return getUserProfilePicture(userDetails.getUser().getId());
+    }
+
+    private MediaType determineMediaType(String filename) {
+        if (filename == null) return MediaType.IMAGE_JPEG;
+        String lower = filename.toLowerCase();
+        if (lower.endsWith(".png")) return MediaType.IMAGE_PNG;
+        if (lower.endsWith(".webp")) return MediaType.parseMediaType("image/webp");
+        if (lower.endsWith(".gif")) return MediaType.IMAGE_GIF;
+        return MediaType.IMAGE_JPEG;
     }
 }

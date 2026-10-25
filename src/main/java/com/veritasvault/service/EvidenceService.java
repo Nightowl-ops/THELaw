@@ -243,4 +243,10 @@ public class EvidenceService {
                 .updatedAt(item.getUpdatedAt())
                 .build();
     }
+
+    @Transactional
+    public void simulateTampering(Long evidenceId) {
+        EvidenceItem evidence = findEvidenceById(evidenceId);
+        fileStorageService.appendTamperByte(evidence.getStorageUrl());
+    }
 }

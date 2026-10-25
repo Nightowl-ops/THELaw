@@ -1,7 +1,10 @@
 package com.veritasvault.controller;
 
+import com.veritasvault.dto.request.CreateLabReportRequest;
 import com.veritasvault.dto.request.CustodyReservationRequest;
 import com.veritasvault.dto.response.CustodyReservationResponse;
+import com.veritasvault.dto.response.ForensicLabReportResponse;
+import com.veritasvault.model.enums.CustodyActionType;
 import com.veritasvault.security.MyUserDetails;
 import com.veritasvault.service.CustodyReservationService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -66,10 +69,39 @@ public class CustodyReservationController {
     public ResponseEntity<CustodyReservationResponse> checkInEvidence(
             @PathVariable Long id,
             @RequestParam(value = "notes", required = false) String notes,
+            @RequestParam(value = "actionType", required = false) CustodyActionType actionType,
             @AuthenticationPrincipal MyUserDetails userDetails
     ) {
         Long currentUserId = userDetails.getUser().getId();
-        CustodyReservationResponse response = reservationService.checkInEvidence(id, notes, currentUserId);
+        CustodyReservationResponse response = reservationService.checkInEvidence(id, notes, actionType, currentUserId);
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Check in evidence with multithreaded forensic lab report",
+               description = "Executes parallel cryptographic hash verification via ExecutorService, generates ForensicLabReport, and completes reservation.")
+    @ApiResponse(responseCode = "200", description = "Evidence checked in and forensic lab report generated")
+    @ApiResponse(responseCode = "400", description = "Invalid reservation state")
+    @ApiResponse(responseCode = "403", description = "Forbidden - Only assigned examiner can check in")
+    @PostMapping("/{id}/checkin")
+    @PreAuthorize("hasAnyRole('ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
+    public ResponseEntity<ForensicLabReportResponse> checkInWithLabReport(
+            @PathVariable Long id,
+            @Valid @RequestBody(required = false) CreateLabReportRequest request,
+            @AuthenticationPrincipal MyUserDetails userDetails
+    ) {
+        Long currentUserId = userDetails.getUser().getId();
+        ForensicLabReportResponse response = reservationService.checkInWithLabReport(id, request, currentUserId);
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Get forensic lab report for a reservation",
+               description = "Retrieves the verification telemetry, hash comparisons, and findings for a completed custody reservation")
+    @ApiResponse(responseCode = "200", description = "Forensic lab report returned")
+    @ApiResponse(responseCode = "404", description = "Report not found")
+    @GetMapping("/{id}/report")
+    @PreAuthorize("hasAnyRole('ROLE_ATTORNEY', 'ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
+    public ResponseEntity<ForensicLabReportResponse> getLabReportByReservationId(@PathVariable Long id) {
+        ForensicLabReportResponse response = reservationService.getLabReportByReservationId(id);
         return ResponseEntity.ok(response);
     }
 

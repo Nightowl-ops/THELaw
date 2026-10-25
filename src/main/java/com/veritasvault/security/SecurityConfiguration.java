@@ -83,6 +83,7 @@ public class SecurityConfiguration {
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/verify")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/forgot-password")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/reset-password")).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/api/auth/users/*/picture")).permitAll()
 
                         // External discovery download and token verification endpoints
                         .requestMatchers(new AntPathRequestMatcher("/api/discovery/access/**")).permitAll()
