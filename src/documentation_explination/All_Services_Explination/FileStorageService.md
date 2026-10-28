@@ -17,6 +17,10 @@ In addition to storage, this service implements critical defense-in-depth securi
 * **`rootStorageLocation`**: A Java `java.nio.file.Path` pointing to the root storage directory on disk (configured via `${app.storage.upload-dir:uploads}`). 
   * In the constructor, this path is converted to an absolute path and normalized (`.toAbsolutePath().normalize()`).
   * If the directory does not exist on server startup, `Files.createDirectories` automatically provisions it.
+* **`fileLocks`**: A `ConcurrentHashMap<String, ReentrantLock>` providing per-file lock striping.
+  * Ensures thread-safe disk modifications on physical files where SQL row locks cannot operate.
+  * When a thread modifies or deletes a file, it acquires a lock only for that specific path.
+  * Automatically evicts the lock entry from the map once no waiting threads remain (`!lock.hasQueuedThreads()`), preventing memory leaks.
 
 ---
 
@@ -45,14 +49,18 @@ In addition to storage, this service implements critical defense-in-depth securi
 * Checks `resource.exists() && resource.isReadable()`. If the file is missing or unreadable, throws `ResourceNotFoundException`.
 * Returns the `Resource` for streaming in REST controllers.
 
-### 3. `deleteFile(String relativePath)`: [Safe File Cleanup]
+### 3. `deleteFile(String relativePath)`: [Thread-Safe File Cleanup]
 * Validates that the path string is not blank.
+* Acquires the `ReentrantLock` for the specific relative path to prevent concurrent modifications during deletion.
 * Confirms the path is within `rootStorageLocation`.
 * Calls `Files.deleteIfExists(filePath)` inside a safe `try-catch` block so cleanup failures never crash an ongoing database transaction.
+* Releases the lock in `finally` via `releaseLockForPath(relativePath, lock)`, evicting the lock if no queued threads exist.
 
-### 4. `appendTamperByte(String relativePath)`: [Forensic Tamper Simulation]
+### 4. `appendTamperByte(String relativePath)`: [Thread-Safe Forensic Tamper Simulation]
 * Developed specifically for **Unit 3 Concurrency & Lab Verification testing**.
+* Acquires the `ReentrantLock` for the specific relative path to serialize write operations on disk.
 * Finds the target file on disk and appends raw byte content (`\n[TAMPERED_BYTE_IN_LAB]`) using `StandardOpenOption.APPEND`.
+* Releases the lock in `finally` via `releaseLockForPath(relativePath, lock)`.
 * When the examiner subsequently checks the evidence back into the vault, the background `labVerificationExecutor` thread recalculates the SHA-256 hash, discovers that the hash no longer matches the baseline, and triggers an automated `COMPROMISED` and `SEQUESTERED` alert.
 
 ---

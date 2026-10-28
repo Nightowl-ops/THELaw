@@ -238,4 +238,104 @@ class CustodyReservationConcurrencyTest {
                 reportResponse.getVerificationDurationMs(),
                 reportResponse.getIntegrityStatus());
     }
+
+    @Test
+    @DisplayName("Multithreading Test: Multiple users checking in different evidence simultaneously are allocated separate pool threads")
+    void concurrentCheckIn_MultipleUsers_AllocatesDistinctPoolThreads() throws InterruptedException {
+        // Create second evidence item
+        EvidenceItem secondEvidence = evidenceItemRepository.save(EvidenceItem.builder()
+                .legalCase(legalCase)
+                .name("Encrypted Android Tablet")
+                .itemTrackingCode("EV-CONCURRENCY-002")
+                .evidenceType(EvidenceType.DEVICE_IMAGE)
+                .sourceOrigin("Officer Locker #14")
+                .storageUrl("evidence/test/sample.dat")
+                .fileSizeBytes(sharedEvidence.getFileSizeBytes())
+                .sha256Hash(sharedEvidence.getSha256Hash())
+                .status(EvidenceStatus.IN_LAB)
+                .uploadedBy(examiner)
+                .build());
+
+        sharedEvidence.setStatus(EvidenceStatus.IN_LAB);
+        evidenceItemRepository.save(sharedEvidence);
+
+        // Create second examiner user
+        User examiner2 = userRepository.save(User.builder()
+                .fullName("Agent Fox Mulder")
+                .email("mulder.concurrency@veritasvault.com")
+                .passwordHash("DummyPasswordHash123$")
+                .role(Role.ROLE_FORENSIC_EXAMINER)
+                .status(UserStatus.ACTIVE)
+                .isEmailVerified(true)
+                .build());
+
+        CustodyReservation res1 = reservationRepository.save(CustodyReservation.builder()
+                .evidenceItem(sharedEvidence)
+                .examiner(examiner)
+                .startTime(LocalDateTime.now().plusHours(1))
+                .endTime(LocalDateTime.now().plusHours(3))
+                .status(ReservationStatus.ACTIVE)
+                .build());
+
+        CustodyReservation res2 = reservationRepository.save(CustodyReservation.builder()
+                .evidenceItem(secondEvidence)
+                .examiner(examiner2)
+                .startTime(LocalDateTime.now().plusHours(1))
+                .endTime(LocalDateTime.now().plusHours(3))
+                .status(ReservationStatus.ACTIVE)
+                .build());
+
+        int userCount = 2;
+        ExecutorService userHttpThreadPool = Executors.newFixedThreadPool(userCount);
+        CountDownLatch readyLatch = new CountDownLatch(userCount);
+        CountDownLatch startGate = new CountDownLatch(1);
+        List<ForensicLabReportResponse> results = java.util.Collections.synchronizedList(new ArrayList<>());
+
+        userHttpThreadPool.submit(() -> {
+            Thread.currentThread().setName("User-Thread-Scully");
+            readyLatch.countDown();
+            try {
+                startGate.await();
+                log.info("[User-Thread-Scully] Checking in Evidence #1 (iPhone)");
+                CreateLabReportRequest req = CreateLabReportRequest.builder()
+                        .examinerFindings("Scully lab analysis clean")
+                        .notes("Shelf 4B")
+                        .build();
+                results.add(reservationService.checkInWithLabReport(res1.getId(), req, examiner.getId()));
+            } catch (Exception e) {
+                log.error("Scully error", e);
+            }
+        });
+
+        userHttpThreadPool.submit(() -> {
+            Thread.currentThread().setName("User-Thread-Mulder");
+            readyLatch.countDown();
+            try {
+                startGate.await();
+                log.info("[User-Thread-Mulder] Checking in Evidence #2 (Tablet)");
+                CreateLabReportRequest req = CreateLabReportRequest.builder()
+                        .examinerFindings("Mulder lab analysis clean")
+                        .notes("Shelf 4C")
+                        .build();
+                results.add(reservationService.checkInWithLabReport(res2.getId(), req, examiner2.getId()));
+            } catch (Exception e) {
+                log.error("Mulder error", e);
+            }
+        });
+
+        readyLatch.await(5, TimeUnit.SECONDS);
+        startGate.countDown();
+
+        userHttpThreadPool.shutdown();
+        boolean done = userHttpThreadPool.awaitTermination(10, TimeUnit.SECONDS);
+        assertThat(done).isTrue();
+        assertThat(results).hasSize(2);
+
+        for (ForensicLabReportResponse r : results) {
+            log.info("CONCURRENT CHECK-IN TELEMETRY -> Evidence: {}, Processed by Worker: {}, Status: {}",
+                    r.getEvidenceName(), r.getVerifiedByThread(), r.getIntegrityStatus());
+            assertThat(r.getIntegrityStatus()).isEqualTo(LabIntegrityStatus.VERIFIED);
+            assertThat(r.getVerifiedByThread()).startsWith("lab-verifier-pool-");
+        }
+    }
 }

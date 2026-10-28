@@ -18,12 +18,22 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
-
+/**
+ * Service managing physical filesystem operations for evidence files on disk.
+ * Uses ReentrantLock to guard physical file I/O operations (such as tampering simulation
+ * and file deletions) against concurrent thread collisions on the local filesystem,
+ * where database SQL locks cannot operate.
+ */
 @Service
 public class FileStorageService {
 
     private final Path rootStorageLocation;
+
+    // Per-file ReentrantLock map ensuring thread-safe disk modifications on physical files
+    private final ConcurrentHashMap<String, ReentrantLock> fileLocks = new ConcurrentHashMap<>();
 
     public FileStorageService(@Value("${app.storage.upload-dir:uploads}") String uploadDir) {
         this.rootStorageLocation = Paths.get(uploadDir).toAbsolutePath().normalize();
@@ -31,6 +41,17 @@ public class FileStorageService {
             Files.createDirectories(this.rootStorageLocation);
         } catch (IOException e) {
             throw new IllegalStateException("Could not initialize root storage directory at: " + this.rootStorageLocation, e);
+        }
+    }
+
+    private ReentrantLock getLockForPath(String relativePath) {
+        return fileLocks.computeIfAbsent(relativePath, path -> new ReentrantLock());
+    }
+
+    private void releaseLockForPath(String relativePath, ReentrantLock lock) {
+        lock.unlock();
+        if (!lock.hasQueuedThreads()) {
+            fileLocks.remove(relativePath, lock);
         }
     }
 
@@ -97,6 +118,8 @@ public class FileStorageService {
             return;
         }
 
+        ReentrantLock lock = getLockForPath(relativePath);
+        lock.lock();
         try {
             Path filePath = this.rootStorageLocation.resolve(relativePath).normalize();
             if (filePath.startsWith(this.rootStorageLocation)) {
@@ -104,6 +127,8 @@ public class FileStorageService {
             }
         } catch (IOException ignored) {
             // Ignore deletion failures during cleanup
+        } finally {
+            releaseLockForPath(relativePath, lock);
         }
     }
 
@@ -112,6 +137,8 @@ public class FileStorageService {
             return;
         }
 
+        ReentrantLock lock = getLockForPath(relativePath);
+        lock.lock();
         try {
             Path filePath = this.rootStorageLocation.resolve(relativePath).normalize();
             if (Files.exists(filePath) && filePath.startsWith(this.rootStorageLocation)) {
@@ -119,6 +146,8 @@ public class FileStorageService {
             }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to simulate tampering on: " + relativePath, e);
+        } finally {
+            releaseLockForPath(relativePath, lock);
         }
     }
 }

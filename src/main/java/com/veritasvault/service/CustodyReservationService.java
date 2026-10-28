@@ -47,8 +47,6 @@ import com.veritasvault.model.LegalCase;
 import com.veritasvault.repository.LegalCaseRepository;
 import java.util.ArrayList;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 @Service
@@ -64,9 +62,6 @@ public class CustodyReservationService {
     private final ForensicLabReportRepository labReportRepository;
     private final FileStorageService fileStorageService;
     private final NotificationService notificationService;
-
-    // Layer 1 in-memory locks per evidence ID (protects DB connection pool from exhaustion)
-    private final ConcurrentHashMap<Long, ReentrantLock> evidenceLocks = new ConcurrentHashMap<>();
 
     // Multithreading thread pool for parallel forensic cryptographic hash verifications
     private final ExecutorService labVerificationExecutor = Executors.newFixedThreadPool(4, new ThreadFactory() {
@@ -98,62 +93,55 @@ public class CustodyReservationService {
             throw new BadRequestException("Cannot create a reservation for a date or time in the past");
         }
 
-        // Layer 1: In-memory ReentrantLock per evidence ID
-        ReentrantLock lock = evidenceLocks.computeIfAbsent(request.getEvidenceItemId(), id -> new ReentrantLock());
-        lock.lock();
-        try {
-            // Layer 2: Pessimistic write lock: blocks concurrent transactions in SQL (SELECT ... FOR UPDATE)
-            EvidenceItem evidence = evidenceItemRepository.findByIdWithPessimisticLock(request.getEvidenceItemId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId()));
+        // Pessimistic write lock: blocks concurrent transactions in SQL (SELECT ... FOR UPDATE)
+        EvidenceItem evidence = evidenceItemRepository.findByIdWithPessimisticLock(request.getEvidenceItemId())
+                .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId()));
 
-            if (evidence.getStatus() == EvidenceStatus.SEQUESTERED || evidence.getStatus() == EvidenceStatus.ADMITTED) {
-                throw new BadRequestException("Evidence item cannot be reserved: current status is " + evidence.getStatus());
-            }
-
-            User examiner = userRepository.findById(examinerId)
-                    .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + examinerId));
-
-            if (examiner.getRole() != Role.ROLE_FORENSIC_EXAMINER && examiner.getRole() != Role.ROLE_ADMIN) {
-                throw new BadRequestException("Only users with ROLE_FORENSIC_EXAMINER or ROLE_ADMIN can reserve custody slots");
-            }
-
-            List<ReservationStatus> blockingStatuses = List.of(ReservationStatus.CONFIRMED, ReservationStatus.ACTIVE);
-            List<CustodyReservation> overlaps = reservationRepository.findOverlappingReservations(
-                    evidence.getId(),
-                    request.getStartTime(),
-                    request.getEndTime(),
-                    blockingStatuses
-            );
-
-            if (!overlaps.isEmpty()) {
-                log.warn("[Thread: {}] Concurrency collision: Evidence item ID {} already reserved during requested interval",
-                        Thread.currentThread().getName(), evidence.getId());
-                throw new ConflictException("Time conflict: Evidence item is already booked during the requested interval");
-            }
-
-            CustodyReservation reservation = CustodyReservation.builder()
-                    .evidenceItem(evidence)
-                    .examiner(examiner)
-                    .startTime(request.getStartTime())
-                    .endTime(request.getEndTime())
-                    .status(ReservationStatus.CONFIRMED)
-                    .notes(request.getNotes())
-                    .build();
-
-            CustodyReservation savedReservation = reservationRepository.save(reservation);
-
-            evidence.setStatus(EvidenceStatus.RESERVED);
-            evidenceItemRepository.save(evidence);
-
-            CustodyReservationResponse response = mapToResponse(savedReservation);
-            notificationService.broadcast("CUSTODY_RESERVATION_CREATED", response);
-
-            log.info("[Thread: {}] Successfully created reservation ID: {} for evidence ID: {}",
-                    Thread.currentThread().getName(), savedReservation.getId(), evidence.getId());
-            return response;
-        } finally {
-            lock.unlock();
+        if (evidence.getStatus() == EvidenceStatus.SEQUESTERED || evidence.getStatus() == EvidenceStatus.ADMITTED) {
+            throw new BadRequestException("Evidence item cannot be reserved: current status is " + evidence.getStatus());
         }
+
+        User examiner = userRepository.findById(examinerId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + examinerId));
+
+        if (examiner.getRole() != Role.ROLE_FORENSIC_EXAMINER && examiner.getRole() != Role.ROLE_ADMIN) {
+            throw new BadRequestException("Only users with ROLE_FORENSIC_EXAMINER or ROLE_ADMIN can reserve custody slots");
+        }
+
+        List<ReservationStatus> blockingStatuses = List.of(ReservationStatus.CONFIRMED, ReservationStatus.ACTIVE);
+        List<CustodyReservation> overlaps = reservationRepository.findOverlappingReservations(
+                evidence.getId(),
+                request.getStartTime(),
+                request.getEndTime(),
+                blockingStatuses
+        );
+
+        if (!overlaps.isEmpty()) {
+            log.warn("[Thread: {}] Concurrency collision: Evidence item ID {} already reserved during requested interval",
+                    Thread.currentThread().getName(), evidence.getId());
+            throw new ConflictException("Time conflict: Evidence item is already booked during the requested interval");
+        }
+
+        CustodyReservation reservation = CustodyReservation.builder()
+                .evidenceItem(evidence)
+                .examiner(examiner)
+                .startTime(request.getStartTime())
+                .endTime(request.getEndTime())
+                .status(ReservationStatus.CONFIRMED)
+                .notes(request.getNotes())
+                .build();
+
+        CustodyReservation savedReservation = reservationRepository.save(reservation);
+
+        evidence.setStatus(EvidenceStatus.RESERVED);
+        evidenceItemRepository.save(evidence);
+
+        CustodyReservationResponse response = mapToResponse(savedReservation);
+        notificationService.broadcast("CUSTODY_RESERVATION_CREATED", response);
+
+        log.info("[Thread: {}] Successfully created reservation ID: {} for evidence ID: {}",
+                Thread.currentThread().getName(), savedReservation.getId(), evidence.getId());
+        return response;
     }
 
     @Transactional

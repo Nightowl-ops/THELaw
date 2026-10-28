@@ -62,10 +62,18 @@ This service is the **heart of our Unit 3 Concurrency & Multithreading architect
 * Releases the evidence item back to `AVAILABLE` status.
 * Appends an audit log in Chain of Custody noting that the reservation slot was released.
 
-### 6. Query Methods (`getReservationById`, `getReservationsForEvidence`, `getReservationsForExaminer`)
+### 6. `auditCaseEvidenceIntegrity(caseId, currentUserId)`: [Batch Case Audit via invokeAll]
+* Allows attorneys, forensic examiners, or administrators to audit the cryptographic integrity of an entire legal case in one call.
+* Constructs a list of `Callable<EvidenceAuditItem>` tasks for every evidence item belonging to the case.
+* Dispatches all tasks concurrently across the 4-worker thread pool using `labVerificationExecutor.invokeAll(tasks)`.
+* Computes fresh SHA-256 hashes in parallel and compares them against baseline hashes.
+* If any file is missing, unreadable, or tampered with, it is flagged as `COMPROMISED`.
+* Returns an aggregated `CaseAuditResponse` with total audited items, verified count, compromised count, individual item details, and total duration in milliseconds.
+
+### 7. Query Methods (`getReservationById`, `getReservationsForEvidence`, `getReservationsForExaminer`)
 * Retrieves paginated or list-based reservation metadata for evidence cards and examiner schedules.
 
-### 7. `shutdownExecutor()`
+### 8. `shutdownExecutor()`
 * Annotated with `@PreDestroy`. When Spring Boot shuts down, it gracefully shuts down the thread pool, ensuring all active file verifications finish cleanly.
 
 ---

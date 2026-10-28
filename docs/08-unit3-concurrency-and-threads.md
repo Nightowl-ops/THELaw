@@ -21,16 +21,21 @@ The Unit 3 Concurrency and Multithreading module addresses two critical real-wor
   * `com.veritasvault.repository.ForensicLabReportRepository`
   * `com.veritasvault.repository.CustodyReservationRepository`
   * `com.veritasvault.repository.EvidenceItemRepository` (contains `findByIdWithPessimisticLock`)
-* **Services:**
-  * `com.veritasvault.service.CustodyReservationService` (manages 4-worker `labVerificationExecutor`)
+* **Services & Configuration:**
+  * `com.veritasvault.config.AsyncConfig` (enables Spring @Async and defines emailTaskExecutor pool)
+  * `com.veritasvault.service.CustodyReservationService` (manages 4-worker labVerificationExecutor and invokeAll batch audits)
+  * `com.veritasvault.service.FileStorageService` (manages per-file ReentrantLock map for physical disk thread safety)
   * `com.veritasvault.service.NotificationService` (broadcasts live SSE telemetry)
-  * `com.veritasvault.service.FileStorageService` (provides `appendTamperByte` simulation)
+  * `com.veritasvault.service.EmailService` (dispatches non-blocking async emails)
 * **Controllers & DTOs:**
   * `com.veritasvault.controller.CustodyReservationController`
   * `com.veritasvault.dto.request.CreateLabReportRequest`
   * `com.veritasvault.dto.response.ForensicLabReportResponse`
-* **Concurrency Verification Test:**
-  * `com.veritasvault.service.CustodyReservationConcurrencyTest` (5-thread parallel `CountDownLatch` test suite)
+  * `com.veritasvault.dto.response.CaseAuditResponse`
+* **Concurrency Verification Tests:**
+  * `com.veritasvault.service.CustodyReservationConcurrencyTest` (5-thread parallel CountDownLatch test suite and multi-user check-in telemetry)
+  * `com.veritasvault.service.ExhibitBinderConcurrencyTest` (3-attorney parallel Bates numbering contiguity test)
+  * `com.veritasvault.service.EmailServiceTest` (verifies background async email thread execution)
 
 ---
 
@@ -102,3 +107,13 @@ Attorney 2 ──► Waits for lock release ────────────
 ### E. Asynchronous Email Notifications (`@EnableAsync`, `@Async`)
 * Outbound SMTP verification and password reset emails are dispatched asynchronously via `AsyncConfig` and `EmailService` using a dedicated `emailTaskExecutor` thread pool (`email-worker-`).
 * HTTP registration and password reset endpoints return immediately in milliseconds without blocking on remote mail server sockets.
+
+### F. Physical File System Concurrency Guard (`ReentrantLock` in `FileStorageService`)
+```
+Thread A (Modifying file1.bin) ──► ReentrantLock[file1] ──► Disk I/O ──► Unlock & Evict
+Thread B (Modifying file2.bin) ──► ReentrantLock[file2] ──► Disk I/O (Runs concurrently!)
+```
+* **The Problem:** Physical files on disk (`uploads/...`) have no database transaction or SQL row lock protection. Concurrent deletes and tamper injections on the same file path can trigger operating system file handle collisions and data corruption.
+* **The Fix:** `FileStorageService` maintains a `ConcurrentHashMap<String, ReentrantLock>` keyed by relative file path. When deleting a file or injecting tamper bytes (`appendTamperByte`), the thread acquires the lock for that specific path.
+* **Memory Leak Prevention:** After `lock.unlock()` executes inside the `finally` block, `releaseLockForPath` checks `if (!lock.hasQueuedThreads())` and evicts the lock entry from the map so the map never grows indefinitely.
+* **Lock Striping:** Operations targeting different files execute completely in parallel without blocking each other.
