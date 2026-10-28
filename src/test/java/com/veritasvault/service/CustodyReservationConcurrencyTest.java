@@ -97,6 +97,17 @@ class CustodyReservationConcurrencyTest {
                 .leadAttorney(examiner)
                 .build());
 
+        byte[] sampleBytes = "Real forensic raw byte payload for lab report test".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String realSha256;
+        try {
+            java.nio.file.Path testPath = java.nio.file.Paths.get("uploads", "evidence", "test", "sample.dat");
+            java.nio.file.Files.createDirectories(testPath.getParent());
+            java.nio.file.Files.write(testPath, sampleBytes);
+            realSha256 = com.veritasvault.util.ChecksumUtils.calculateSha256(new java.io.ByteArrayInputStream(sampleBytes));
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Failed to seed test evidence file", e);
+        }
+
         sharedEvidence = evidenceItemRepository.save(EvidenceItem.builder()
                 .legalCase(legalCase)
                 .name("Encrypted iPhone 15 Pro")
@@ -104,8 +115,8 @@ class CustodyReservationConcurrencyTest {
                 .evidenceType(EvidenceType.DEVICE_IMAGE)
                 .sourceOrigin("Officer Locker #12")
                 .storageUrl("evidence/test/sample.dat")
-                .fileSizeBytes(1024L)
-                .sha256Hash("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+                .fileSizeBytes((long) sampleBytes.length)
+                .sha256Hash(realSha256)
                 .status(EvidenceStatus.AVAILABLE)
                 .uploadedBy(examiner)
                 .build());

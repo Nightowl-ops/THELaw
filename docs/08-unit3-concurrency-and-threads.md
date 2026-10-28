@@ -70,3 +70,35 @@ Main HTTP Thread ◄── Future.get() (Buzzer) ◄─────────�
 7. Inserts the verification record into the **10th table (`forensic_lab_reports`)**.
 8. Appends a `CHECK_IN` (or `INTEGRITY_FAILED`) log into the Chain of Custody ledger.
 9. Broadcasts `EVIDENCE_CHECKED_IN` or `TAMPER_ALERT_QUARANTINE` across SSE telemetry.
+
+### C. Batch Case Integrity Audit Flow (`invokeAll` across Thread Pool)
+```
+Main HTTP Thread ──► Builds List<Callable<EvidenceAuditItem>> for Case
+                           │
+                           ├──► Worker-1: Hashes Evidence #101
+                           ├──► Worker-2: Hashes Evidence #102
+                           ├──► Worker-3: Hashes Evidence #103
+                           └──► Worker-4: Hashes Evidence #104
+                           │
+Main HTTP Thread ◄── labVerificationExecutor.invokeAll(tasks) ◄── (All complete)
+         │
+         └── Aggregates totalItems, verifiedCount, compromisedCount into CaseAuditResponse
+```
+1. Client requests batch audit: `POST /api/custody/reservations/case/{caseId}/audit`.
+2. Service fetches all evidence items for the given case.
+3. Constructs a list of `Callable<EvidenceAuditItem>` tasks.
+4. Executes `labVerificationExecutor.invokeAll(tasks)` to concurrently verify all items across the 4-thread pool in parallel.
+5. Returns a complete `CaseAuditResponse` with individual item integrity verdicts and elapsed duration in milliseconds.
+
+### D. Exhibit Binder Bates Numbering Concurrency Lock
+```
+Attorney 1 ──► [SELECT ... FOR UPDATE on ExhibitBinder] ──► Sets Bates 0001 - 0010 ──► Commits
+Attorney 2 ──► Waits for lock release ─────────────────► Sets Bates 0011 - 0020 ──► Commits
+```
+* **The Problem:** Without a lock, simultaneous requests adding exhibits to the same trial binder would calculate the same starting Bates number, resulting in conflicting and overlapping page numbers.
+* **The Fix:** `ExhibitBinderRepository.findByIdWithPessimisticLock(binderId)` locks the parent binder row with `SELECT ... FOR UPDATE`.
+* **Verification:** `ExhibitBinderConcurrencyTest` executes 3 concurrent attorney threads and asserts that all 3 exhibits receive strictly contiguous page ranges (e.g. 1-10, 11-20, 21-30) with zero overlap.
+
+### E. Asynchronous Email Notifications (`@EnableAsync`, `@Async`)
+* Outbound SMTP verification and password reset emails are dispatched asynchronously via `AsyncConfig` and `EmailService` using a dedicated `emailTaskExecutor` thread pool (`email-worker-`).
+* HTTP registration and password reset endpoints return immediately in milliseconds without blocking on remote mail server sockets.

@@ -32,7 +32,10 @@ The legal system requires court exhibits to be organized into a structured, numb
   * Bates prefix normalized to uppercase (e.g., `"STATE-V-DOE"`).
 * **Return:** Saves the entity and returns a clean `BinderResponse` containing 0 initial exhibits and 0 pages.
 
-### 2. `addExhibitToBinder(binderId, request)`: [Continuous Bates Pagination]
+### 2. `addExhibitToBinder(binderId, request)`: [Continuous Bates Pagination with Concurrency Lock]
+* **Pessimistic Row Lock (`SELECT ... FOR UPDATE`):**
+  * Acquires a pessimistic write lock using `binderRepository.findByIdWithPessimisticLock(binderId)`.
+  * **Why this is critical:** If two attorneys add exhibits simultaneously to the same binder, without this lock both transactions would read the same `lastExhibit.batesEndNum` and assign overlapping Bates page ranges to different documents. The pessimistic lock forces concurrent requests to serialize, ensuring completely contiguous, collision-free page ranges.
 * **Immutability Check:** Calls `assertBinderIsMutable(binder)`. If the binder is `FINALIZED` or `SERVED`, any modification is blocked with `BadRequestException`.
 * **Case Integrity Check:** Verifies that the evidence item actually belongs to the *same* legal case as the binder. An attorney cannot slip evidence from Case #102 into a trial binder for Case #405!
 * **Duplicate Check:** Ensures the evidence item is not already included in this specific binder.

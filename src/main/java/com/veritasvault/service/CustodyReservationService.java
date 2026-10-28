@@ -42,6 +42,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.veritasvault.dto.response.CaseAuditResponse;
+import com.veritasvault.model.LegalCase;
+import com.veritasvault.repository.LegalCaseRepository;
+import java.util.ArrayList;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 @Service
@@ -52,10 +59,14 @@ public class CustodyReservationService {
     private final CustodyReservationRepository reservationRepository;
     private final EvidenceItemRepository evidenceItemRepository;
     private final UserRepository userRepository;
+    private final LegalCaseRepository legalCaseRepository;
     private final ChainOfCustodyLogRepository custodyLogRepository;
     private final ForensicLabReportRepository labReportRepository;
     private final FileStorageService fileStorageService;
     private final NotificationService notificationService;
+
+    // Layer 1 in-memory locks per evidence ID (protects DB connection pool from exhaustion)
+    private final ConcurrentHashMap<Long, ReentrantLock> evidenceLocks = new ConcurrentHashMap<>();
 
     // Multithreading thread pool for parallel forensic cryptographic hash verifications
     private final ExecutorService labVerificationExecutor = Executors.newFixedThreadPool(4, new ThreadFactory() {
@@ -87,55 +98,62 @@ public class CustodyReservationService {
             throw new BadRequestException("Cannot create a reservation for a date or time in the past");
         }
 
-        // Pessimistic write lock: blocks concurrent transactions until this one commits
-        EvidenceItem evidence = evidenceItemRepository.findByIdWithPessimisticLock(request.getEvidenceItemId())
-                .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId()));
+        // Layer 1: In-memory ReentrantLock per evidence ID
+        ReentrantLock lock = evidenceLocks.computeIfAbsent(request.getEvidenceItemId(), id -> new ReentrantLock());
+        lock.lock();
+        try {
+            // Layer 2: Pessimistic write lock: blocks concurrent transactions in SQL (SELECT ... FOR UPDATE)
+            EvidenceItem evidence = evidenceItemRepository.findByIdWithPessimisticLock(request.getEvidenceItemId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Evidence item not found with ID: " + request.getEvidenceItemId()));
 
-        if (evidence.getStatus() == EvidenceStatus.SEQUESTERED || evidence.getStatus() == EvidenceStatus.ADMITTED) {
-            throw new BadRequestException("Evidence item cannot be reserved: current status is " + evidence.getStatus());
+            if (evidence.getStatus() == EvidenceStatus.SEQUESTERED || evidence.getStatus() == EvidenceStatus.ADMITTED) {
+                throw new BadRequestException("Evidence item cannot be reserved: current status is " + evidence.getStatus());
+            }
+
+            User examiner = userRepository.findById(examinerId)
+                    .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + examinerId));
+
+            if (examiner.getRole() != Role.ROLE_FORENSIC_EXAMINER && examiner.getRole() != Role.ROLE_ADMIN) {
+                throw new BadRequestException("Only users with ROLE_FORENSIC_EXAMINER or ROLE_ADMIN can reserve custody slots");
+            }
+
+            List<ReservationStatus> blockingStatuses = List.of(ReservationStatus.CONFIRMED, ReservationStatus.ACTIVE);
+            List<CustodyReservation> overlaps = reservationRepository.findOverlappingReservations(
+                    evidence.getId(),
+                    request.getStartTime(),
+                    request.getEndTime(),
+                    blockingStatuses
+            );
+
+            if (!overlaps.isEmpty()) {
+                log.warn("[Thread: {}] Concurrency collision: Evidence item ID {} already reserved during requested interval",
+                        Thread.currentThread().getName(), evidence.getId());
+                throw new ConflictException("Time conflict: Evidence item is already booked during the requested interval");
+            }
+
+            CustodyReservation reservation = CustodyReservation.builder()
+                    .evidenceItem(evidence)
+                    .examiner(examiner)
+                    .startTime(request.getStartTime())
+                    .endTime(request.getEndTime())
+                    .status(ReservationStatus.CONFIRMED)
+                    .notes(request.getNotes())
+                    .build();
+
+            CustodyReservation savedReservation = reservationRepository.save(reservation);
+
+            evidence.setStatus(EvidenceStatus.RESERVED);
+            evidenceItemRepository.save(evidence);
+
+            CustodyReservationResponse response = mapToResponse(savedReservation);
+            notificationService.broadcast("CUSTODY_RESERVATION_CREATED", response);
+
+            log.info("[Thread: {}] Successfully created reservation ID: {} for evidence ID: {}",
+                    Thread.currentThread().getName(), savedReservation.getId(), evidence.getId());
+            return response;
+        } finally {
+            lock.unlock();
         }
-
-        User examiner = userRepository.findById(examinerId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + examinerId));
-
-        if (examiner.getRole() != Role.ROLE_FORENSIC_EXAMINER && examiner.getRole() != Role.ROLE_ADMIN) {
-            throw new BadRequestException("Only users with ROLE_FORENSIC_EXAMINER or ROLE_ADMIN can reserve custody slots");
-        }
-
-        List<ReservationStatus> blockingStatuses = List.of(ReservationStatus.CONFIRMED, ReservationStatus.ACTIVE);
-        List<CustodyReservation> overlaps = reservationRepository.findOverlappingReservations(
-                evidence.getId(),
-                request.getStartTime(),
-                request.getEndTime(),
-                blockingStatuses
-        );
-
-        if (!overlaps.isEmpty()) {
-            log.warn("[Thread: {}] Concurrency collision: Evidence item ID {} already reserved during requested interval",
-                    Thread.currentThread().getName(), evidence.getId());
-            throw new ConflictException("Time conflict: Evidence item is already booked during the requested interval");
-        }
-
-        CustodyReservation reservation = CustodyReservation.builder()
-                .evidenceItem(evidence)
-                .examiner(examiner)
-                .startTime(request.getStartTime())
-                .endTime(request.getEndTime())
-                .status(ReservationStatus.CONFIRMED)
-                .notes(request.getNotes())
-                .build();
-
-        CustodyReservation savedReservation = reservationRepository.save(reservation);
-
-        evidence.setStatus(EvidenceStatus.RESERVED);
-        evidenceItemRepository.save(evidence);
-
-        CustodyReservationResponse response = mapToResponse(savedReservation);
-        notificationService.broadcast("CUSTODY_RESERVATION_CREATED", response);
-
-        log.info("[Thread: {}] Successfully created reservation ID: {} for evidence ID: {}",
-                Thread.currentThread().getName(), savedReservation.getId(), evidence.getId());
-        return response;
     }
 
     @Transactional
@@ -261,16 +279,24 @@ public class CustodyReservationService {
             try {
                 if (evidence.getStorageUrl() != null && !evidence.getStorageUrl().isBlank() && fileStorageService != null) {
                     Resource resource = fileStorageService.loadAsResource(evidence.getStorageUrl());
-                    try (InputStream is = resource.getInputStream()) {
-                        computedHash = ChecksumUtils.calculateSha256(is);
+                    if (resource != null && resource.exists() && resource.isReadable()) {
+                        try (InputStream is = resource.getInputStream()) {
+                            computedHash = ChecksumUtils.calculateSha256(is);
+                        }
+                    } else {
+                        log.warn("[Worker-Thread: {}] Evidence file does not exist or is not readable: {}",
+                                workerThread, evidence.getStorageUrl());
+                        computedHash = "FILE_NOT_FOUND_OR_UNREADABLE";
                     }
                 } else {
-                    computedHash = preExamHash;
+                    log.warn("[Worker-Thread: {}] No storage URL associated with evidence #{}",
+                            workerThread, evidence.getId());
+                    computedHash = "STORAGE_URL_MISSING";
                 }
             } catch (Exception ex) {
-                log.warn("[Worker-Thread: {}] Could not read file stream from storage: {}. Fallback to recorded hash.",
+                log.warn("[Worker-Thread: {}] Could not read file stream from storage: {}. Evidence integrity compromised.",
                         workerThread, ex.getMessage());
-                computedHash = preExamHash;
+                computedHash = "FILE_READ_ERROR: " + ex.getMessage();
             }
 
             long duration = System.currentTimeMillis() - startTime;
@@ -365,6 +391,153 @@ public class CustodyReservationService {
         ForensicLabReport report = labReportRepository.findByCustodyReservationId(reservationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Forensic lab report not found for reservation ID: " + reservationId));
         return mapToReportResponse(report);
+    }
+
+    /**
+     * Batch Case Integrity Audit executing parallel cryptographic SHA-256 verifications
+     * across all evidence items in a case concurrently using invokeAll() on the 4-worker thread pool.
+     */
+    @Transactional
+    public CaseAuditResponse auditCaseEvidenceIntegrity(Long caseId, Long currentUserId) {
+        LegalCase legalCase = legalCaseRepository.findById(caseId)
+                .orElseThrow(() -> new ResourceNotFoundException("Legal case not found with ID: " + caseId));
+
+        User auditor = userRepository.findById(currentUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + currentUserId));
+
+        if (auditor.getRole() != Role.ROLE_ATTORNEY && auditor.getRole() != Role.ROLE_FORENSIC_EXAMINER && auditor.getRole() != Role.ROLE_ADMIN) {
+            throw new AccessDeniedException("Only attorneys, forensic examiners, or administrators can run case audits");
+        }
+
+        List<EvidenceItem> items = evidenceItemRepository.findByLegalCaseId(caseId);
+        if (items.isEmpty()) {
+            return CaseAuditResponse.builder()
+                    .caseId(caseId)
+                    .caseNumber(legalCase.getCaseNumber())
+                    .caseTitle(legalCase.getCaseTitle())
+                    .totalEvidenceAudited(0)
+                    .verifiedCount(0)
+                    .compromisedCount(0)
+                    .totalDurationMs(0)
+                    .auditItems(List.of())
+                    .auditedAt(LocalDateTime.now())
+                    .build();
+        }
+
+        log.info("[Main-Thread: {}] Initiating parallel case integrity audit for case #{} ({} evidence items)",
+                Thread.currentThread().getName(), legalCase.getCaseNumber(), items.size());
+
+        long batchStartTime = System.currentTimeMillis();
+
+        // Prepare parallel Callable tasks for all evidence items
+        List<Callable<CaseAuditResponse.EvidenceAuditItem>> tasks = new ArrayList<>();
+        for (EvidenceItem item : items) {
+            tasks.add(() -> {
+                long itemStart = System.currentTimeMillis();
+                String workerThread = Thread.currentThread().getName();
+                String computedHash = null;
+                LabIntegrityStatus status;
+
+                try {
+                    if (item.getStorageUrl() != null && !item.getStorageUrl().isBlank() && fileStorageService != null) {
+                        Resource resource = fileStorageService.loadAsResource(item.getStorageUrl());
+                        if (resource != null && resource.exists() && resource.isReadable()) {
+                            try (InputStream is = resource.getInputStream()) {
+                                computedHash = ChecksumUtils.calculateSha256(is);
+                            }
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.warn("[Worker-Thread: {}] Audit could not read evidence #{} ({}): {}",
+                            workerThread, item.getId(), item.getItemTrackingCode(), ex.getMessage());
+                }
+
+                if (computedHash != null && item.getSha256Hash() != null && item.getSha256Hash().equalsIgnoreCase(computedHash)) {
+                    status = LabIntegrityStatus.VERIFIED;
+                } else {
+                    status = LabIntegrityStatus.COMPROMISED;
+                }
+
+                long itemDuration = System.currentTimeMillis() - itemStart;
+                log.info("[Worker-Thread: {}] Audited evidence #{} ({}) in {} ms. Status: {}",
+                        workerThread, item.getId(), item.getItemTrackingCode(), itemDuration, status);
+
+                return CaseAuditResponse.EvidenceAuditItem.builder()
+                        .evidenceId(item.getId())
+                        .trackingCode(item.getItemTrackingCode())
+                        .name(item.getName())
+                        .baselineHash(item.getSha256Hash())
+                        .computedHash(computedHash != null ? computedHash : "UNREADABLE_OR_MISSING")
+                        .status(status)
+                        .verifiedByThread(workerThread)
+                        .durationMs(itemDuration)
+                        .build();
+            });
+        }
+
+        // Execute all tasks concurrently using invokeAll() across the 4-worker thread pool
+        List<Future<CaseAuditResponse.EvidenceAuditItem>> futures;
+        try {
+            futures = labVerificationExecutor.invokeAll(tasks);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Batch case integrity audit was interrupted", e);
+        }
+
+        List<CaseAuditResponse.EvidenceAuditItem> auditResults = new ArrayList<>();
+        int verifiedCount = 0;
+        int compromisedCount = 0;
+
+        for (int i = 0; i < futures.size(); i++) {
+            try {
+                CaseAuditResponse.EvidenceAuditItem result = futures.get(i).get();
+                auditResults.add(result);
+
+                if (result.getStatus() == LabIntegrityStatus.VERIFIED) {
+                    verifiedCount++;
+                } else {
+                    compromisedCount++;
+                    EvidenceItem item = items.get(i);
+                    item.setStatus(EvidenceStatus.SEQUESTERED);
+                    evidenceItemRepository.save(item);
+
+                    ChainOfCustodyLog auditAlert = ChainOfCustodyLog.builder()
+                            .evidenceItem(item)
+                            .actor(auditor)
+                            .actionType(CustodyActionType.ANALYZE)
+                            .notes("BATCH INTEGRITY AUDIT ALERT: Tamper detected during parallel case audit. Evidence quarantined.")
+                            .hashAtEvent(result.getComputedHash())
+                            .build();
+                    custodyLogRepository.save(auditAlert);
+                }
+            } catch (Exception e) {
+                log.error("Failed to retrieve audit result for evidence", e);
+            }
+        }
+
+        long totalDurationMs = System.currentTimeMillis() - batchStartTime;
+        log.info("[Main-Thread: {}] Batch audit complete for case #{} in {} ms. Verified: {}, Compromised: {}",
+                Thread.currentThread().getName(), legalCase.getCaseNumber(), totalDurationMs, verifiedCount, compromisedCount);
+
+        CaseAuditResponse response = CaseAuditResponse.builder()
+                .caseId(caseId)
+                .caseNumber(legalCase.getCaseNumber())
+                .caseTitle(legalCase.getCaseTitle())
+                .totalEvidenceAudited(items.size())
+                .verifiedCount(verifiedCount)
+                .compromisedCount(compromisedCount)
+                .totalDurationMs(totalDurationMs)
+                .auditItems(auditResults)
+                .auditedAt(LocalDateTime.now())
+                .build();
+
+        if (compromisedCount > 0) {
+            notificationService.broadcast("CASE_AUDIT_COMPROMISED", response);
+        } else {
+            notificationService.broadcast("CASE_AUDIT_COMPLETED", response);
+        }
+
+        return response;
     }
 
     @Transactional(readOnly = true)

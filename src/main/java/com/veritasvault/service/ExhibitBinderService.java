@@ -67,7 +67,8 @@ public class ExhibitBinderService {
 
     @Transactional
     public BinderResponse addExhibitToBinder(Long binderId, AddExhibitRequest request) {
-        ExhibitBinder binder = findBinderById(binderId);
+        ExhibitBinder binder = binderRepository.findByIdWithPessimisticLock(binderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Exhibit binder not found with ID: " + binderId));
 
         assertBinderIsMutable(binder);
 
@@ -107,7 +108,8 @@ public class ExhibitBinderService {
 
     @Transactional
     public BinderResponse removeExhibitFromBinder(Long binderId, Long exhibitId) {
-        ExhibitBinder binder = findBinderById(binderId);
+        ExhibitBinder binder = binderRepository.findByIdWithPessimisticLock(binderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Exhibit binder not found with ID: " + binderId));
         assertBinderIsMutable(binder);
 
         BinderExhibit exhibit = binderExhibitRepository.findById(exhibitId)

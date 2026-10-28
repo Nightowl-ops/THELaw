@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,7 +23,10 @@ public class EmailService {
     @Value("${app.server.base-url:http://localhost:8085}")
     private String baseUrl;
 
+    @Async("emailTaskExecutor")
     public void sendVerificationEmail(String toEmail, String verificationToken) {
+        log.info("[Async-Thread: {}] Preparing to send verification email to {}",
+                Thread.currentThread().getName(), toEmail);
         try {
             String verificationUrl = baseUrl + "/api/auth/verify?token=" + verificationToken;
 
@@ -37,13 +41,18 @@ public class EmailService {
                     + "If you did not create an account, please ignore this email.");
 
             mailSender.send(message);
-            log.info("Verification email sent to {}", toEmail);
+            log.info("[Async-Thread: {}] Verification email successfully sent to {}",
+                    Thread.currentThread().getName(), toEmail);
         } catch (Exception e) {
-            log.error("Failed to send verification email to {}: {}", toEmail, e.getMessage());
+            log.error("[Async-Thread: {}] Failed to send verification email to {}: {}",
+                    Thread.currentThread().getName(), toEmail, e.getMessage());
         }
     }
 
+    @Async("emailTaskExecutor")
     public void sendPasswordResetEmail(String toEmail, String resetToken) {
+        log.info("[Async-Thread: {}] Preparing to send password reset email to {}",
+                Thread.currentThread().getName(), toEmail);
         try {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);
@@ -56,9 +65,11 @@ public class EmailService {
                     + "If you did not request this, please notify your administrator immediately.");
 
             mailSender.send(message);
-            log.info("Password reset email sent to {}", toEmail);
+            log.info("[Async-Thread: {}] Password reset email successfully sent to {}",
+                    Thread.currentThread().getName(), toEmail);
         } catch (Exception e) {
-            log.error("Failed to send password reset email to {}: {}", toEmail, e.getMessage());
+            log.error("[Async-Thread: {}] Failed to send password reset email to {}: {}",
+                    Thread.currentThread().getName(), toEmail, e.getMessage());
         }
     }
 }

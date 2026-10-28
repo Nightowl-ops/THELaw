@@ -2,6 +2,7 @@ package com.veritasvault.controller;
 
 import com.veritasvault.dto.request.CreateLabReportRequest;
 import com.veritasvault.dto.request.CustodyReservationRequest;
+import com.veritasvault.dto.response.CaseAuditResponse;
 import com.veritasvault.dto.response.CustodyReservationResponse;
 import com.veritasvault.dto.response.ForensicLabReportResponse;
 import com.veritasvault.model.enums.CustodyActionType;
@@ -102,6 +103,21 @@ public class CustodyReservationController {
     @PreAuthorize("hasAnyRole('ROLE_ATTORNEY', 'ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
     public ResponseEntity<ForensicLabReportResponse> getLabReportByReservationId(@PathVariable Long id) {
         ForensicLabReportResponse response = reservationService.getLabReportByReservationId(id);
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Batch case evidence integrity audit",
+               description = "Concurrently recalculates cryptographic SHA-256 hashes across all evidence in a case using invokeAll() on the 4-worker thread pool.")
+    @ApiResponse(responseCode = "200", description = "Batch audit completed with report")
+    @ApiResponse(responseCode = "403", description = "Forbidden - Restricted to attorneys, examiners, or admins")
+    @PostMapping("/case/{caseId}/audit")
+    @PreAuthorize("hasAnyRole('ROLE_ATTORNEY', 'ROLE_FORENSIC_EXAMINER', 'ROLE_ADMIN')")
+    public ResponseEntity<CaseAuditResponse> auditCaseEvidenceIntegrity(
+            @PathVariable Long caseId,
+            @AuthenticationPrincipal MyUserDetails userDetails
+    ) {
+        Long currentUserId = userDetails.getUser().getId();
+        CaseAuditResponse response = reservationService.auditCaseEvidenceIntegrity(caseId, currentUserId);
         return ResponseEntity.ok(response);
     }
 

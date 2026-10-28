@@ -53,6 +53,8 @@ class CustodyReservationServiceTest {
     private ForensicLabReportRepository labReportRepository;
     @Mock
     private FileStorageService fileStorageService;
+    @Mock
+    private com.veritasvault.repository.LegalCaseRepository legalCaseRepository;
 
     @InjectMocks
     private CustodyReservationService reservationService;
@@ -273,8 +275,19 @@ class CustodyReservationServiceTest {
 
     @Test
     @DisplayName("Should check in evidence: mark reservation COMPLETED, evidence AVAILABLE, and log check-in")
-    void checkInEvidence_Success() {
+    void checkInEvidence_Success() throws Exception {
+        byte[] testBytes = "clean checkin data".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String testHash = com.veritasvault.util.ChecksumUtils.calculateSha256(new java.io.ByteArrayInputStream(testBytes));
+        evidence.setSha256Hash(testHash);
+        evidence.setStorageUrl("evidence/case-1/test.bin");
         evidence.setStatus(EvidenceStatus.IN_LAB);
+
+        org.springframework.core.io.Resource mockResource = mock(org.springframework.core.io.Resource.class);
+        when(mockResource.exists()).thenReturn(true);
+        when(mockResource.isReadable()).thenReturn(true);
+        when(mockResource.getInputStream()).thenReturn(new java.io.ByteArrayInputStream(testBytes));
+        when(fileStorageService.loadAsResource("evidence/case-1/test.bin")).thenReturn(mockResource);
+
         CustodyReservation reservation = CustodyReservation.builder()
                 .id(400L)
                 .evidenceItem(evidence)
@@ -302,8 +315,19 @@ class CustodyReservationServiceTest {
 
     @Test
     @DisplayName("Should generate ForensicLabReport with verified status and multithreading telemetry on check-in")
-    void checkInWithLabReport_Success() {
+    void checkInWithLabReport_Success() throws Exception {
+        byte[] testBytes = "clean forensic data".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String testHash = com.veritasvault.util.ChecksumUtils.calculateSha256(new java.io.ByteArrayInputStream(testBytes));
+        evidence.setSha256Hash(testHash);
+        evidence.setStorageUrl("evidence/case-1/test.bin");
         evidence.setStatus(EvidenceStatus.IN_LAB);
+
+        org.springframework.core.io.Resource mockResource = mock(org.springframework.core.io.Resource.class);
+        when(mockResource.exists()).thenReturn(true);
+        when(mockResource.isReadable()).thenReturn(true);
+        when(mockResource.getInputStream()).thenReturn(new java.io.ByteArrayInputStream(testBytes));
+        when(fileStorageService.loadAsResource("evidence/case-1/test.bin")).thenReturn(mockResource);
+
         CustodyReservation reservation = CustodyReservation.builder()
                 .id(450L)
                 .evidenceItem(evidence)
@@ -329,5 +353,87 @@ class CustodyReservationServiceTest {
         assertThat(reportResponse.getVerifiedByThread()).startsWith("lab-verifier-pool-");
         assertThat(reportResponse.getExaminerFindings()).contains("Microfilm analysis");
         assertThat(evidence.getStatus()).isEqualTo(EvidenceStatus.AVAILABLE);
+    }
+
+    @Test
+    @DisplayName("Should mark integrity COMPROMISED and quarantine evidence as SEQUESTERED when evidence file is missing from disk")
+    void checkInWithLabReport_MissingFile_MarksCompromised() {
+        evidence.setStatus(EvidenceStatus.IN_LAB);
+        evidence.setStorageUrl("evidence/case-1/missing.bin");
+        evidence.setSha256Hash("original-hash-123");
+
+        CustodyReservation reservation = CustodyReservation.builder()
+                .id(460L)
+                .evidenceItem(evidence)
+                .examiner(examiner)
+                .status(ReservationStatus.ACTIVE)
+                .build();
+
+        when(reservationRepository.findById(460L)).thenReturn(Optional.of(reservation));
+        when(userRepository.findById(10L)).thenReturn(Optional.of(examiner));
+        when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(labReportRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(fileStorageService.loadAsResource("evidence/case-1/missing.bin"))
+                .thenThrow(new com.veritasvault.exception.ResourceNotFoundException("File not found on disk"));
+
+        com.veritasvault.dto.request.CreateLabReportRequest request = com.veritasvault.dto.request.CreateLabReportRequest.builder()
+                .examinerFindings("Attempted check-in but file is missing")
+                .notes("Missing file test")
+                .build();
+
+        com.veritasvault.dto.response.ForensicLabReportResponse reportResponse =
+                reservationService.checkInWithLabReport(460L, request, 10L);
+
+        assertThat(reportResponse).isNotNull();
+        assertThat(reportResponse.getIntegrityStatus()).isEqualTo(com.veritasvault.model.enums.LabIntegrityStatus.COMPROMISED);
+        assertThat(reportResponse.getPostExamHash()).contains("FILE_READ_ERROR");
+        assertThat(evidence.getStatus()).isEqualTo(EvidenceStatus.SEQUESTERED);
+
+        verify(notificationService, times(1)).broadcast(eq("EVIDENCE_COMPROMISED"), any());
+        verify(evidenceItemRepository, times(1)).save(evidence);
+    }
+
+    @Test
+    @DisplayName("Should execute parallel case integrity audit across thread pool using invokeAll()")
+    void auditCaseEvidenceIntegrity_ParallelInvokeAll_Success() {
+        com.veritasvault.model.LegalCase legalCase = com.veritasvault.model.LegalCase.builder()
+                .id(1L)
+                .caseNumber("CV-2026-0001")
+                .caseTitle("State v. John Doe")
+                .build();
+
+        EvidenceItem item1 = EvidenceItem.builder()
+                .id(101L)
+                .itemTrackingCode("EV-2026-0001")
+                .name("Evidence 1")
+                .sha256Hash("hash-1")
+                .storageUrl("evidence/case-1/ev1.bin")
+                .status(EvidenceStatus.AVAILABLE)
+                .build();
+
+        EvidenceItem item2 = EvidenceItem.builder()
+                .id(102L)
+                .itemTrackingCode("EV-2026-0002")
+                .name("Evidence 2")
+                .sha256Hash("hash-2")
+                .storageUrl("evidence/case-1/ev2.bin")
+                .status(EvidenceStatus.AVAILABLE)
+                .build();
+
+        when(legalCaseRepository.findById(1L)).thenReturn(Optional.of(legalCase));
+        when(userRepository.findById(10L)).thenReturn(Optional.of(examiner));
+        when(evidenceItemRepository.findByLegalCaseId(1L)).thenReturn(List.of(item1, item2));
+
+        com.veritasvault.dto.response.CaseAuditResponse auditResponse =
+                reservationService.auditCaseEvidenceIntegrity(1L, 10L);
+
+        assertThat(auditResponse).isNotNull();
+        assertThat(auditResponse.getCaseId()).isEqualTo(1L);
+        assertThat(auditResponse.getTotalEvidenceAudited()).isEqualTo(2);
+        assertThat(auditResponse.getAuditItems()).hasSize(2);
+        assertThat(auditResponse.getAuditItems().get(0).getVerifiedByThread()).startsWith("lab-verifier-pool-");
+        assertThat(auditResponse.getAuditItems().get(1).getVerifiedByThread()).startsWith("lab-verifier-pool-");
+
+        verify(notificationService, times(1)).broadcast(any(), any());
     }
 }

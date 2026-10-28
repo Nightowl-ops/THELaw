@@ -162,7 +162,7 @@ class ExhibitBinderServiceTest {
                 .pageCount(5)
                 .build();
 
-        when(binderRepository.findById(100L)).thenReturn(Optional.of(binder));
+        when(binderRepository.findByIdWithPessimisticLock(100L)).thenReturn(Optional.of(binder));
         when(evidenceItemRepository.findById(50L)).thenReturn(Optional.of(evidenceItem));
         when(binderExhibitRepository.existsByBinderIdAndEvidenceItemId(100L, 50L)).thenReturn(false);
 
@@ -199,7 +199,7 @@ class ExhibitBinderServiceTest {
                 .pageCount(2)
                 .build();
 
-        when(binderRepository.findById(100L)).thenReturn(Optional.of(binder));
+        when(binderRepository.findByIdWithPessimisticLock(100L)).thenReturn(Optional.of(binder));
 
         assertThatThrownBy(() -> binderService.addExhibitToBinder(100L, request))
                 .isInstanceOf(BadRequestException.class)
@@ -217,7 +217,7 @@ class ExhibitBinderServiceTest {
                 .pageCount(3)
                 .build();
 
-        when(binderRepository.findById(100L)).thenReturn(Optional.of(binder));
+        when(binderRepository.findByIdWithPessimisticLock(100L)).thenReturn(Optional.of(binder));
         when(evidenceItemRepository.findById(50L)).thenReturn(Optional.of(evidenceItem));
         when(binderExhibitRepository.existsByBinderIdAndEvidenceItemId(100L, 50L)).thenReturn(true);
 
@@ -256,7 +256,7 @@ class ExhibitBinderServiceTest {
                 .batesEndNum(10)
                 .build();
 
-        when(binderRepository.findById(100L)).thenReturn(Optional.of(binder));
+        when(binderRepository.findByIdWithPessimisticLock(100L)).thenReturn(Optional.of(binder));
         when(binderExhibitRepository.findById(1L)).thenReturn(Optional.of(exhibit1));
         List<BinderExhibit> remaining = new ArrayList<>(List.of(exhibit2));
         when(binderExhibitRepository.findByBinderIdOrderByBatesStartNumAsc(100L)).thenReturn(remaining);
