@@ -12,6 +12,8 @@ import com.veritasvault.auth.model.enums.UserStatus;
 import com.veritasvault.auth.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -62,6 +64,7 @@ public class AdminUserService {
     }
 
     @Transactional
+    @CacheEvict(value = "users", key = "#userId")
     public UserProfileResponse updateUserStatus(Long userId, UserStatus status) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
@@ -88,6 +91,7 @@ public class AdminUserService {
     }
 
     @Transactional
+    @CacheEvict(value = "users", key = "#userId")
     public UserProfileResponse updateUserRole(Long userId, Role newRole) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
@@ -98,6 +102,7 @@ public class AdminUserService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(value = "users", key = "#userId")
     public UserProfileResponse getUserById(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));

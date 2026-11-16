@@ -14,6 +14,8 @@ import com.veritasvault.caseevidence.model.enums.Role;
 import com.veritasvault.caseevidence.repository.LegalCaseRepository;
 import com.veritasvault.caseevidence.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
@@ -31,6 +33,7 @@ public class LegalCaseService {
     private final AuthServiceClient authServiceClient;
 
     @Transactional
+    @CacheEvict(value = "cases", allEntries = true)
     public CaseResponse createCase(CreateCaseRequest request, UserPrincipal currentUser) {
         if (legalCaseRepository.existsByCaseNumber(request.getCaseNumber())) {
             throw new ConflictException("Case number '" + request.getCaseNumber() + "' already exists");
@@ -89,6 +92,7 @@ public class LegalCaseService {
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(value = "cases", key = "#id")
     public CaseResponse getCaseById(Long id) {
         LegalCase legalCase = legalCaseRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Legal case not found with ID: " + id));
@@ -125,6 +129,7 @@ public class LegalCaseService {
     }
 
     @Transactional
+    @CacheEvict(value = "cases", key = "#id")
     public CaseResponse updateCaseStatus(Long id, CaseStatus newStatus) {
         LegalCase legalCase = legalCaseRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Legal case not found with ID: " + id));

@@ -54,12 +54,7 @@ public class SecurityConfiguration {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-                "http://localhost:3000",
-                "http://localhost:8080"
-        ));
+        config.setAllowedOriginPatterns(List.of("*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Cache-Control"));
         config.setExposedHeaders(List.of("Content-Disposition"));
@@ -86,6 +81,10 @@ public class SecurityConfiguration {
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/reset-password")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/users/*/picture")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/api/users/**")).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/v3/api-docs/**")).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/swagger-ui/**")).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/swagger-ui.html")).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/actuator/**")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/error")).permitAll()
 
                         // Admin routes
