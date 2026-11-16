@@ -1,6 +1,6 @@
 services:
   # ==========================================
-  # 1. PostgreSQL (Multi-Database Container)
+  # 1. PostgreSQL (Single Database: veritas_db)
   # ==========================================
   postgres:
     image: postgres:16-alpine
@@ -9,16 +9,18 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: veritas_db
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U postgres -d veritas_db"]
+      interval: 3s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 15s
 
   # ==========================================
   # 2. pgAdmin 4 (Web Database UI)
@@ -37,7 +39,7 @@ services:
         condition: service_healthy
 
   # ==========================================
-  # 3. Apache Kafka (KRaft Mode - No Zookeeper Needed)
+  # 3. Apache Kafka (KRaft Mode - Shared Event Bus)
   # ==========================================
   kafka:
     image: apache/kafka:3.7.0
@@ -49,9 +51,9 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -59,7 +61,7 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
 
   # ==========================================
-  # 3. Auth & Identity Microservice
+  # 4. Service 1: Auth & Identity Microservice
   # ==========================================
   auth-service:
     build:
@@ -75,11 +77,112 @@ services:
       kafka:
         condition: service_started
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/veritas_auth_db
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgrespassword
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/veritas_db}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-postgrespassword}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SERVER_PORT: 8081
 
+  # ==========================================
+  # 5. Service 2: Case & Evidence Microservice
+  # ==========================================
+  case-evidence-service:
+    build:
+      context: ./case-evidence-service
+      dockerfile: Dockerfile
+    container_name: veritas-case-evidence-service
+    restart: on-failure
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      auth-service:
+        condition: service_started
+    volumes:
+      - evidence_uploads:/app/uploads
+    environment:
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/veritas_db}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-postgrespassword}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SERVICES_AUTH_URL: http://auth-service:8081
+      APP_STORAGE_UPLOAD_DIR: /app/uploads
+      SERVER_PORT: 8082
+
+  # ==========================================
+  # 6. Service 3: Forensic Lab & Custody Vault Service
+  # ==========================================
+  forensic-vault-service:
+    build:
+      context: ./forensic-vault-service
+      dockerfile: Dockerfile
+    container_name: veritas-forensic-vault-service
+    restart: on-failure
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      case-evidence-service:
+        condition: service_started
+    volumes:
+      - evidence_uploads:/app/uploads
+    environment:
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/veritas_db}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-postgrespassword}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SERVICES_AUTH_URL: http://auth-service:8081
+      SERVICES_CASE_URL: http://case-evidence-service:8082
+      APP_STORAGE_UPLOAD_DIR: /app/uploads
+      SERVER_PORT: 8083
+
+  # ==========================================
+  # 7. API Gateway (Reverse Proxy & CORS Router)
+  # ==========================================
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: veritas-api-gateway
+    restart: on-failure
+    ports:
+      - "8080:8080"
+    depends_on:
+      auth-service:
+        condition: service_started
+      case-evidence-service:
+        condition: service_started
+      forensic-vault-service:
+        condition: service_started
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8081
+      CASE_SERVICE_URL: http://case-evidence-service:8082
+      FORENSIC_SERVICE_URL: http://forensic-vault-service:8083
+      SERVER_PORT: 8080
+
+  # ==========================================
+  # 8. React Frontend (Nginx SPA + API Proxy)
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: veritas-frontend
+    restart: on-failure
+    ports:
+      - "5173:80"
+    depends_on:
+      api-gateway:
+        condition: service_started
+
 volumes:
   pgdata:
+  evidence_uploads:

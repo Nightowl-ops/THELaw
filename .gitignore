@@ -35,3 +35,6 @@ build/
 ### VeritasVault Runtime Directories ###
 uploads/
 docs_notes.txt
+node_modules/
+**/node_modules/
+frontend/dist/
