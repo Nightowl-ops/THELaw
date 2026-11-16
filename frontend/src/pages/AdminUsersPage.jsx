@@ -11,12 +11,25 @@ import { extractErrorMessage } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
 export default function AdminUsersPage() {
-  const { mode, pushNotification } = useAuth();
+  const { user: currentUser, mode, pushNotification } = useAuth();
 
   const [users, setUsers] = useState([]);
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Debounce search input by 400ms to allow typing full sentences/words
+  useEffect(() => {
+    if (!search.trim()) {
+      setDebouncedSearch('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -39,7 +52,7 @@ export default function AdminUsersPage() {
       const res = await adminUsersApi.getUsers({
         role: roleFilter || undefined,
         status: statusFilter || undefined,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
       });
       setUsers(res.content || (Array.isArray(res) ? res : []));
     } catch (err) {
@@ -47,7 +60,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [roleFilter, statusFilter, search, mode]);
+  }, [roleFilter, statusFilter, debouncedSearch, mode]);
 
   useEffect(() => {
     fetchUsers();
@@ -137,6 +150,12 @@ export default function AdminUsersPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                setDebouncedSearch(search.trim());
+              }
+            }}
             placeholder="Search by name or email..."
             className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#FAF6F0] border border-[#DFC3AC] text-xs"
           />
@@ -190,46 +209,73 @@ export default function AdminUsersPage() {
                   </td>
                 </tr>
               ) : (
-                users.map((u) => (
-                  <tr key={u.id} className="hover:bg-[#FAF6F0]/60 transition">
-                    <td className="py-4 px-5">
-                      <div className="font-bold text-[#1E130D]">{u.fullName}</div>
-                      <div className="text-[#6E3F23]">{u.email}</div>
-                    </td>
-                    <td className="py-4 px-5">
-                      <div className="font-medium text-[#1E130D]">
-                        {u.organizationOrAgency || '-'}
-                      </div>
-                      <div className="text-[11px] text-[#8B5230]">
-                        {u.barOrBadgeNumber || 'Not listed'}
-                      </div>
-                    </td>
-                    <td className="py-4 px-5">
-                      <select
-                        value={u.role}
-                        onChange={(e) => handleRoleUpdate(u.id, e.target.value)}
-                        className="px-3 py-1.5 rounded-xl bg-[#FAF6F0] border border-[#DFC3AC] font-bold text-[#1E130D] text-xs"
-                      >
-                        <option value="ROLE_ADMIN">Administrator</option>
-                        <option value="ROLE_ATTORNEY">Lead Attorney</option>
-                        <option value="ROLE_FORENSIC_EXAMINER">Forensic Examiner</option>
-                        <option value="ROLE_CLIENT">Client</option>
-                      </select>
-                    </td>
-                    <td className="py-4 px-5">
-                      <button
-                        onClick={() => handleStatusToggle(u)}
-                        className={`px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider border cursor-pointer ${
-                          u.status === 'ACTIVE'
-                            ? 'bg-emerald-950/10 text-emerald-900 border-emerald-700/30'
-                            : 'bg-red-100 text-red-900 border-red-300'
-                        }`}
-                      >
-                        {u.status === 'ACTIVE' ? 'Active' : 'Inactive'}
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                users.map((u) => {
+                  const isSelf = currentUser && (
+                    (currentUser.userId && String(u.id) === String(currentUser.userId)) ||
+                    (currentUser.id && String(u.id) === String(currentUser.id)) ||
+                    (currentUser.email && u.email?.toLowerCase() === currentUser.email?.toLowerCase())
+                  );
+
+                  return (
+                    <tr key={u.id} className="hover:bg-[#FAF6F0]/60 transition">
+                      <td className="py-4 px-5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-[#1E130D]">{u.fullName}</span>
+                          {isSelf && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#3E2A1E] text-white">
+                              You
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[#6E3F23]">{u.email}</div>
+                      </td>
+                      <td className="py-4 px-5">
+                        <div className="font-medium text-[#1E130D]">
+                          {u.organizationOrAgency || '-'}
+                        </div>
+                        <div className="text-[11px] text-[#8B5230]">
+                          {u.barOrBadgeNumber || 'Not listed'}
+                        </div>
+                      </td>
+                      <td className="py-4 px-5">
+                        <select
+                          value={u.role}
+                          disabled={isSelf}
+                          title={isSelf ? "You cannot modify your own administrator role" : undefined}
+                          onChange={(e) => handleRoleUpdate(u.id, e.target.value)}
+                          className={`px-3 py-1.5 rounded-xl border font-bold text-xs ${
+                            isSelf
+                              ? 'bg-[#EADBC8]/50 border-[#DFC3AC] text-[#8B5230] cursor-not-allowed opacity-80'
+                              : 'bg-[#FAF6F0] border-[#DFC3AC] text-[#1E130D] cursor-pointer'
+                          }`}
+                        >
+                          <option value="ROLE_ADMIN">Administrator</option>
+                          <option value="ROLE_ATTORNEY">Lead Attorney</option>
+                          <option value="ROLE_FORENSIC_EXAMINER">Forensic Examiner</option>
+                          <option value="ROLE_CLIENT">Client</option>
+                        </select>
+                      </td>
+                      <td className="py-4 px-5">
+                        <button
+                          disabled={isSelf}
+                          title={isSelf ? "You cannot deactivate your own account" : undefined}
+                          onClick={() => handleStatusToggle(u)}
+                          className={`px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider border ${
+                            isSelf
+                              ? 'opacity-80 cursor-not-allowed '
+                              : 'cursor-pointer '
+                          }${
+                            u.status === 'ACTIVE'
+                              ? 'bg-emerald-950/10 text-emerald-900 border-emerald-700/30'
+                              : 'bg-red-100 text-red-900 border-red-300'
+                          }`}
+                        >
+                          {u.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

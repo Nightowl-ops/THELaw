@@ -143,10 +143,15 @@ export default function LabReservationsPage() {
     setError('');
     try {
       const normalizeTime = (t) => (t.length === 16 ? `${t}:00` : t);
+      const minFuture = new Date(Date.now() + 60000);
+      const safeStart =
+        new Date(form.startTime) <= minFuture ? toLocalDateTimeInput(2) : form.startTime;
+      const safeEnd =
+        new Date(form.endTime) <= new Date(safeStart) ? toLocalDateTimeInput(30) : form.endTime;
       const created = await reservationsApi.createReservation({
         evidenceItemId: Number(form.evidenceItemId || selectedEvidenceId),
-        startTime: normalizeTime(form.startTime),
-        endTime: normalizeTime(form.endTime),
+        startTime: normalizeTime(safeStart),
+        endTime: normalizeTime(safeEnd),
       });
       pushNotification(
         'Lab Session Scheduled',
@@ -331,8 +336,8 @@ export default function LabReservationsPage() {
               setError('');
               setForm({
                 evidenceItemId: selectedEvidenceId,
-                startTime: toLocalDateTimeInput(2),
-                endTime: toLocalDateTimeInput(15),
+                startTime: toLocalDateTimeInput(5),
+                endTime: toLocalDateTimeInput(35),
               });
               setShowModal(true);
             }}

@@ -226,7 +226,7 @@ export default function AppLayout() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-vault-pattern">
         {/* Top Bar: White & Warm Brown Accent Header */}
-        <header className="h-16 bg-white/95 backdrop-blur-md border-b border-[#E6D7C3] px-8 flex items-center justify-between sticky top-0 z-10 shadow-xs">
+        <header className="h-16 bg-white/95 backdrop-blur-md border-b border-[#E6D7C3] px-8 flex items-center justify-between sticky top-0 z-40 shadow-xs">
           <div className="flex items-center gap-4">
             <h2 className="font-serif-legal text-2xl font-bold text-[#1E130D]">
               {visibleNav.find((n) => location.pathname.startsWith(n.to))?.label || 'VeritasVault'}

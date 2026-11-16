@@ -1,7 +1,6 @@
 import axios from 'axios';
 
-// Base URL points to /api which Vite proxies to http://localhost:8085/api
-// Or can connect directly to http://localhost:8085/api thanks to CORS in SecurityConfiguration.java
+// Base URL points to /api which Vite proxies to http://127.0.0.1:8080/api (API Gateway)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 const apiClient = axios.create({
@@ -11,11 +10,14 @@ const apiClient = axios.create({
   },
 });
 
-// Automatically attach JWT Bearer token to every outbound request
+// Automatically attach JWT Bearer token to every outbound request (except public auth endpoints)
 apiClient.interceptors.request.use(
   (config) => {
+    const isPublicAuth = config.url?.startsWith('/auth/login') ||
+                         config.url?.startsWith('/auth/register') ||
+                         config.url?.startsWith('/auth/verify');
     const token = localStorage.getItem('vv_token');
-    if (token) {
+    if (token && !isPublicAuth) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
@@ -29,14 +31,15 @@ export function extractErrorMessage(err) {
   if (err.response?.data) {
     const data = err.response.data;
     if (typeof data === 'string') return data;
+    const validationMap = data.validationErrors || data.errors;
+    if (validationMap && typeof validationMap === 'object') {
+      return Object.values(validationMap).join(', ');
+    }
     if (data.message) return data.message;
     if (data.error) return data.error;
-    if (data.errors && typeof data.errors === 'object') {
-      return Object.values(data.errors).join(', ');
-    }
   }
   if (err.code === 'ERR_NETWORK') {
-    return 'Cannot reach Spring Boot backend at http://localhost:8085. Make sure LawApplication is running (or switch to Interactive Demo Mode to preview the UI).';
+    return 'Cannot reach API Gateway backend at http://localhost:8080. Make sure Docker containers are running.';
   }
   return err.message || 'Request failed';
 }

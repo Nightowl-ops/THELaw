@@ -35,14 +35,21 @@ export default function DiscoveryPage() {
   const [loadingReceipts, setLoadingReceipts] = useState(false);
 
   // Create Production Modal
-  const [showProduceModal, setShowProduceModal] = useState(false);
+  const toFutureDateTime = (daysAhead = 14) => {
+    const d = new Date(Date.now() + daysAhead * 86400000);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
+
+  const [showProduceModal, setShowProduceModal] = useState(
+    Boolean(searchParams.get('binderId'))
+  );
   const [selectedBinderId, setSelectedBinderId] = useState(
     searchParams.get('binderId') || ''
   );
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => ({
     recipientParty: 'Opposing Counsel - Cross & Associates LLP',
-    expiresAt: '2026-11-30T23:59',
-  });
+    expiresAt: toFutureDateTime(14),
+  }));
 
   useEffect(() => {
     (async () => {
@@ -74,13 +81,19 @@ export default function DiscoveryPage() {
       setProductions(Array.isArray(pRes) ? pRes : pRes.content || []);
       const bList = bRes.content || (Array.isArray(bRes) ? bRes : []);
       setBinders(bList);
-      setSelectedBinderId(bList.length > 0 ? String(bList[0].id) : '');
+      const paramBinderId = searchParams.get('binderId');
+      if (paramBinderId && bList.some((b) => String(b.id) === String(paramBinderId))) {
+        setSelectedBinderId(String(paramBinderId));
+      } else {
+        const preferred = bList.find((b) => b.isLocked || b.status === 'FINALIZED') || bList[0];
+        setSelectedBinderId(preferred ? String(preferred.id) : '');
+      }
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [selectedCaseId, mode]);
+  }, [selectedCaseId, mode, searchParams]);
 
   useEffect(() => {
     fetchData();
@@ -97,6 +110,7 @@ export default function DiscoveryPage() {
       const normalizeTime = (t) => (t.length === 16 ? `${t}:00` : t);
       const created = await discoveryApi.createProduction(selectedBinderId, {
         caseId: Number(selectedCaseId),
+        binderId: Number(selectedBinderId),
         recipientParty: form.recipientParty,
         expiresAt: normalizeTime(form.expiresAt),
       });

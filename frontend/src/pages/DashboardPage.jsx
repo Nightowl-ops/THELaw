@@ -43,6 +43,19 @@ export default function DashboardPage() {
 
   // Filters
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Debounce search input by 400ms to allow typing full sentences/words
+  useEffect(() => {
+    if (!search.trim()) {
+      setDebouncedSearch('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
 
@@ -67,7 +80,7 @@ export default function DashboardPage() {
       const data = await casesApi.getCases({
         status: statusFilter || undefined,
         type: typeFilter || undefined,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
       });
       setCases(data.content || (Array.isArray(data) ? data : []));
     } catch (err) {
@@ -75,7 +88,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, typeFilter, search, mode]);
+  }, [statusFilter, typeFilter, debouncedSearch, mode]);
 
   useEffect(() => {
     fetchCases();
@@ -207,6 +220,12 @@ export default function DashboardPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                setDebouncedSearch(search.trim());
+              }
+            }}
             placeholder="Search by case number, title, or opposing party..."
             className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#FAF6F0] border border-[#DFC3AC] text-sm focus:outline-none focus:border-[#8B5230] focus:bg-white transition"
           />
