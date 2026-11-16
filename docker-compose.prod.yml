@@ -1,0 +1,157 @@
+services:
+  # ==========================================
+  # 1. PostgreSQL (Single Database: veritas_db)
+  # When deployed with AWS RDS, this container can be disabled or kept as fallback
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: veritas-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: veritas_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d veritas_db"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ==========================================
+  # 2. Apache Kafka (KRaft Mode - Shared Event Bus)
+  # ==========================================
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: veritas-kafka
+    restart: always
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  # ==========================================
+  # 3. Service 1: Auth & Identity Microservice (ECR)
+  # ==========================================
+  auth-service:
+    image: 411711548396.dkr.ecr.us-east-1.amazonaws.com/veritas-auth-service:latest
+    container_name: veritas-auth-service
+    restart: on-failure
+    ports:
+      - "8081:8081"
+    depends_on:
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://veritasvault-db.ckf0yi44iig0.us-east-1.rds.amazonaws.com:5432/veritas_db}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-postgrespassword}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SERVER_PORT: 8081
+
+  # ==========================================
+  # 4. Service 2: Case & Evidence Microservice (ECR)
+  # ==========================================
+  case-evidence-service:
+    image: 411711548396.dkr.ecr.us-east-1.amazonaws.com/veritas-case-evidence-service:latest
+    container_name: veritas-case-evidence-service
+    restart: on-failure
+    ports:
+      - "8082:8082"
+    depends_on:
+      kafka:
+        condition: service_started
+      auth-service:
+        condition: service_started
+    volumes:
+      - evidence_uploads:/app/uploads
+    environment:
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://veritasvault-db.ckf0yi44iig0.us-east-1.rds.amazonaws.com:5432/veritas_db}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-postgrespassword}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SERVICES_AUTH_URL: http://auth-service:8081
+      APP_STORAGE_UPLOAD_DIR: /app/uploads
+      SERVER_PORT: 8082
+
+  # ==========================================
+  # 5. Service 3: Forensic Lab & Custody Vault Service (ECR)
+  # ==========================================
+  forensic-vault-service:
+    image: 411711548396.dkr.ecr.us-east-1.amazonaws.com/veritas-forensic-vault-service:latest
+    container_name: veritas-forensic-vault-service
+    restart: on-failure
+    ports:
+      - "8083:8083"
+    depends_on:
+      kafka:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      case-evidence-service:
+        condition: service_started
+    volumes:
+      - evidence_uploads:/app/uploads
+    environment:
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://veritasvault-db.ckf0yi44iig0.us-east-1.rds.amazonaws.com:5432/veritas_db}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-postgrespassword}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SERVICES_AUTH_URL: http://auth-service:8081
+      SERVICES_CASE_URL: http://case-evidence-service:8082
+      APP_STORAGE_UPLOAD_DIR: /app/uploads
+      SERVER_PORT: 8083
+
+  # ==========================================
+  # 6. API Gateway (Reverse Proxy & CORS Router) (ECR)
+  # ==========================================
+  api-gateway:
+    image: 411711548396.dkr.ecr.us-east-1.amazonaws.com/veritas-api-gateway:latest
+    container_name: veritas-api-gateway
+    restart: on-failure
+    ports:
+      - "8080:8080"
+    depends_on:
+      auth-service:
+        condition: service_started
+      case-evidence-service:
+        condition: service_started
+      forensic-vault-service:
+        condition: service_started
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8081
+      CASE_SERVICE_URL: http://case-evidence-service:8082
+      FORENSIC_SERVICE_URL: http://forensic-vault-service:8083
+      SERVER_PORT: 8080
+
+  # ==========================================
+  # 7. React Frontend (Nginx SPA + API Proxy) (ECR)
+  # ==========================================
+  frontend:
+    image: 411711548396.dkr.ecr.us-east-1.amazonaws.com/veritas-frontend:latest
+    container_name: veritas-frontend
+    restart: on-failure
+    ports:
+      - "5173:80"
+    depends_on:
+      api-gateway:
+        condition: service_started
+
+volumes:
+  pgdata:
+  evidence_uploads:
