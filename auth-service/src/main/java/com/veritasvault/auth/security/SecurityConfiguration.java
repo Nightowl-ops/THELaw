@@ -85,6 +85,7 @@ public class SecurityConfiguration {
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/forgot-password")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/reset-password")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/api/auth/users/*/picture")).permitAll()
+                        .requestMatchers(new AntPathRequestMatcher("/api/users/**")).permitAll()
                         .requestMatchers(new AntPathRequestMatcher("/error")).permitAll()
 
                         // Admin routes

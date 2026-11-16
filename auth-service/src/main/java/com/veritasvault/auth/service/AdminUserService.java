@@ -96,4 +96,11 @@ public class AdminUserService {
         User updated = userRepository.save(user);
         return authService.mapToProfileResponse(updated);
     }
+
+    @Transactional(readOnly = true)
+    public UserProfileResponse getUserById(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+        return authService.mapToProfileResponse(user);
+    }
 }

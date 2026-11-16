@@ -1,7 +1,7 @@
 # Veritas Identity & Authentication Microservice (`auth-service`)
 
 > **Port:** `8081`  
-> **Database:** `veritas_auth_db`  
+> **Database:** `veritas_db`  
 > **Package:** `com.veritasvault.auth`  
 
 This microservice is the sole security and identity authority for VeritasVault. It manages all human credentials, roles, password lifecycles, JWT token issuing with embedded claims, and Kafka user deactivation broadcasts.
