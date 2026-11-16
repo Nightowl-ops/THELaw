@@ -6,7 +6,7 @@ spring:
     name: forensic-vault-service
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/veritas_vault_db
+    url: jdbc:postgresql://localhost:5432/veritas_db
     username: postgres
     password: postgrespassword
     driver-class-name: org.postgresql.Driver
@@ -31,7 +31,20 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
-        spring.json.trusted.packages: "com.veritasvault.*"
+        spring.json.trusted.packages: "*"
+        spring.json.type.mapping: "com.veritasvault.auth.kafka.event.UserDeactivatedEvent:com.veritasvault.forensicvault.kafka.event.UserDeactivatedEvent,com.veritasvault.caseevidence.kafka.event.EvidenceIngestedEvent:com.veritasvault.forensicvault.kafka.event.EvidenceIngestedEvent"
+
+app:
+  storage:
+    upload-dir: uploads
+  server:
+    base-url: http://localhost:8083
+
+services:
+  auth:
+    url: ${AUTH_SERVICE_URL:http://localhost:8081}
+  case:
+    url: ${CASE_SERVICE_URL:http://localhost:8082}
 
 jwt:
   secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
