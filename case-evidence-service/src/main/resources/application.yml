@@ -6,10 +6,15 @@ spring:
     name: case-evidence-service
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/veritas_case_db
+    url: jdbc:postgresql://localhost:5432/veritas_db
     username: postgres
     password: postgrespassword
     driver-class-name: org.postgresql.Driver
+
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
 
   jpa:
     hibernate:
@@ -31,7 +36,18 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
-        spring.json.trusted.packages: "com.veritasvault.*"
+        spring.json.trusted.packages: "*"
+        spring.json.type.mapping: "com.veritasvault.forensicvault.kafka.event.EvidenceTamperedEvent:com.veritasvault.caseevidence.kafka.event.EvidenceTamperedEvent"
+
+app:
+  storage:
+    upload-dir: uploads
+  server:
+    base-url: http://localhost:8082
+
+services:
+  auth:
+    url: ${AUTH_SERVICE_URL:http://localhost:8081}
 
 jwt:
   secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
