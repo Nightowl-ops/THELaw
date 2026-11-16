@@ -7,21 +7,37 @@ spring:
 
   cloud:
     gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origins:
+              - "http://localhost:5173"
+              - "http://localhost:3000"
+              - "http://127.0.0.1:5173"
+            allowed-methods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowed-headers: "*"
+            allow-credentials: true
       routes:
         # Route 1: Auth & User Service
         - id: auth-service-route
-          uri: http://localhost:8081
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
           predicates:
-            - Path=/api/auth/**, /api/admin/users/**
+            - Path=/api/auth/**, /api/admin/users/**, /api/users/**
 
         # Route 2: Case & Evidence Service
         - id: case-evidence-service-route
-          uri: http://localhost:8082
+          uri: ${CASE_SERVICE_URL:http://localhost:8082}
           predicates:
             - Path=/api/cases/**, /api/evidence/**, /api/binders/**, /api/discovery/**
 
-        # Route 3: Forensic Lab & Custody Vault Service
+        # Route 3: Forensic Lab, Custody Vault & Real-Time Telemetry Stream Service
         - id: forensic-vault-service-route
-          uri: http://localhost:8083
+          uri: ${FORENSIC_SERVICE_URL:http://localhost:8083}
           predicates:
-            - Path=/api/reservations/**, /api/custody/**, /api/lab-reports/**
+            - Path=/api/reservations/**, /api/custody/**, /api/lab-reports/**, /api/notifications/**
