@@ -10,6 +10,13 @@
 
 VeritasVault is an enterprise digital forensics vault and legal custody lifecycle platform built for law firms, forensic labs, judicial counsel, and litigation teams. It provides courtroom grade digital custody tracking, automated evidence hashing, lab scheduling, trial exhibit preparation, and discovery exchange.
 
+> **Live Production Deployment URL:** [http://54.162.223.159:5173](http://54.162.223.159:5173)
+>
+> **Default Test Credentials:**
+> * System Administrator: `admin@veritasvault.com` / `Password123!`
+> * Forensic Examiner: `examiner@veritasvault.com` / `Password123!`
+> * Trial Attorney: `attorney@veritasvault.com` / `Password123!`
+
 In this production release (Unit 4), the monolithic architecture has been refactored into an independently scalable microservices platform, containerized with Docker, decoupled using Apache Kafka event streaming, cached with Spring Cache, verified with Cucumber BDD test suites, and deployed to AWS (RDS PostgreSQL, EC2, and ECR) through an automated Jenkins CI/CD pipeline.
 
 ---
@@ -205,8 +212,8 @@ The live production system is hosted on Amazon Web Services in region `us-east-1
   * Tagged with semantic version `1.0.0` and `latest`.
 
 ### Live Production Web Application
-* **Frontend URL:** `http://54.162.223.159:5173`
-* **API Gateway Route:** `http://54.162.223.159:8080/api`
+* **Frontend Web Application:** [http://54.162.223.159:5173](http://54.162.223.159:5173)
+* **API Gateway Route:** [http://54.162.223.159:8080/api](http://54.162.223.159:8080/api)
 
 ---
 
