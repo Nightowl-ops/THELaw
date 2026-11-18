@@ -24,7 +24,20 @@ services:
       start_period: 15s
 
   # ==========================================
-  # 2. Apache Kafka (KRaft Mode - Shared Event Bus)
+  # 2. pgAdmin 4 (Web Database UI)
+  # ==========================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: veritas-pgadmin
+    restart: always
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@veritasvault.com
+      PGADMIN_DEFAULT_PASSWORD: Password123!
+
+  # ==========================================
+  # 3. Apache Kafka (KRaft Mode - Shared Event Bus)
   # ==========================================
   kafka:
     image: apache/kafka:3.7.0
