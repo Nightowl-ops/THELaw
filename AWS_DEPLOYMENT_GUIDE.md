@@ -8,7 +8,7 @@ This document records every step, setting, and command used to deploy **VeritasV
 
 ```mermaid
 flowchart LR
-    Browser["User Browser\nhttp://54.162.223.159:5173"]
+    Browser["User Browser\nhttp://98.91.232.127:5173"]
 
     subgraph VPC["AWS Default VPC (vpc-01053523baa4ea891) — us-east-1"]
         subgraph EC2["AWS EC2 Instance: veritasvault-server (t3.medium)"]
@@ -118,7 +118,7 @@ In `docker-compose.yml`, the 3 database-backed microservices (`auth-service`, `c
 | **Instance type** | Instance type | `t3.medium` (2 vCPU, 4 GiB RAM) | Provides 4 GB RAM so all 4 Spring Boot JVMs + Kafka + Nginx run smoothly without Out-Of-Memory errors. |
 | **Key pair (login)** | Key pair | `Proceed without a key pair` (or `veritas-key.pem`) | We connect directly via browser-based **EC2 Instance Connect**. |
 | **Network settings** | VPC | `vpc-01053523baa4ea891` | Same VPC as `veritasvault-db` RDS for sub-millisecond internal routing. |
-| | Auto-assign public IP | `Enable` | Assigns public IPv4 address (`54.162.223.159`). |
+| | Auto-assign public IP | `Enable` | Assigns public IPv4 address (`98.91.232.127`). |
 | | Firewall (Security Group) | `Create security group` (`launch-wizard-1` / `sg-09179e300ebb6bed3`) | Controls which ports are public vs. private. |
 | **Configure storage** | Root volume | `25 GiB` `gp3` SSD | Increased from default `8 GiB` to `25 GiB` (within 30 GiB Free Tier) to hold Maven/Node Docker build layers. |
 

@@ -6,11 +6,11 @@
 [![Docker](https://img.shields.io/badge/Docker%20Compose-Orchestrated-blue.svg)](https://www.docker.com/)
 [![AWS](https://img.shields.io/badge/AWS-RDS%20%2B%20EC2%20%2B%20ECR-orange.svg)](https://aws.amazon.com/)
 [![CI/CD](https://img.shields.io/badge/Jenkins-Automated%20Pipeline-red.svg)](https://www.jenkins.io/)
-[![Swagger](https://img.shields.io/badge/OpenAPI%203-Swagger%20UI-yellow.svg)](http://54.162.223.159:8080)
+[![Swagger](https://img.shields.io/badge/OpenAPI%203-Swagger%20UI-yellow.svg)](http://98.91.232.127:8080)
 
 VeritasVault is an enterprise digital forensics vault and legal custody lifecycle platform built for law firms, forensic labs, judicial counsel, and litigation teams. It provides courtroom grade digital custody tracking, automated evidence hashing, lab scheduling, trial exhibit preparation, and discovery exchange.
 
-> **Live Production Deployment URL:** [http://54.162.223.159:5173](http://54.162.223.159:5173)
+> **Live Production Deployment URL:** [http://98.91.232.127:5173](http://98.91.232.127:5173)
 >
 > **Default Test Credentials:**
 > * System Administrator: `admin@veritasvault.com` / `Password123!`
@@ -131,9 +131,9 @@ sequenceDiagram
 
 ---
 
-## 4. Service Data Ownership
+## 4. Service Data Ownership and Entity Relationship Diagram (ERD)
 
-Each microservice manages dedicated database tables to prevent cross-service database coupling:
+Each microservice manages dedicated database tables within its bounded context to maintain loose coupling:
 
 ```
 veritas_db (AWS RDS PostgreSQL)
@@ -154,6 +154,118 @@ veritas_db (AWS RDS PostgreSQL)
     └── forensic_lab_reports (Tamper verification reports and findings)
 ```
 
+### Visual Entity Relationship Diagram (ERD)
+
+```mermaid
+erDiagram
+    USERS ||--o{ LEGAL_CASES : "assigned lead counsel"
+    USERS ||--o{ CUSTODY_RESERVATIONS : "requests reservation"
+    USERS ||--o{ CHAIN_OF_CUSTODY_LOGS : "performs custody action"
+
+    LEGAL_CASES ||--o{ EVIDENCE_ITEMS : "contains"
+    LEGAL_CASES ||--o{ EXHIBIT_BINDERS : "organizes"
+    LEGAL_CASES ||--o{ DISCOVERY_PRODUCTIONS : "produces"
+
+    EXHIBIT_BINDERS ||--o{ BINDER_EXHIBITS : "includes"
+    EVIDENCE_ITEMS ||--o{ BINDER_EXHIBITS : "referenced in"
+
+    DISCOVERY_PRODUCTIONS ||--o{ DISCOVERY_ACCESS_LOGS : "logs receipts"
+
+    EVIDENCE_ITEMS ||--o{ CHAIN_OF_CUSTODY_LOGS : "tracked by"
+    EVIDENCE_ITEMS ||--o{ CUSTODY_RESERVATIONS : "reserved for lab"
+    CUSTODY_RESERVATIONS ||--o| FORENSIC_LAB_REPORTS : "produces report"
+
+    USERS {
+        uuid id PK
+        string email UK
+        string password_hash
+        string full_name
+        string role
+        string status
+    }
+
+    LEGAL_CASES {
+        uuid id PK
+        string case_number UK
+        string title
+        string court_jurisdiction
+        string judge_name
+        uuid lead_counsel_id FK
+        string status
+    }
+
+    EVIDENCE_ITEMS {
+        uuid id PK
+        uuid case_id FK
+        string evidence_number UK
+        string bates_number UK
+        string file_name
+        string sha256_checksum
+        bigint file_size_bytes
+        string status
+    }
+
+    EXHIBIT_BINDERS {
+        uuid id PK
+        uuid case_id FK
+        string title
+        string status
+    }
+
+    BINDER_EXHIBITS {
+        uuid id PK
+        uuid binder_id FK
+        uuid evidence_item_id FK
+        string exhibit_number
+        int order_index
+    }
+
+    DISCOVERY_PRODUCTIONS {
+        uuid id PK
+        uuid case_id FK
+        string production_number UK
+        string opposing_counsel_email
+        string access_token UK
+        string status
+    }
+
+    DISCOVERY_ACCESS_LOGS {
+        uuid id PK
+        uuid production_id FK
+        string ip_address
+        timestamp accessed_at
+    }
+
+    CUSTODY_RESERVATIONS {
+        uuid id PK
+        uuid evidence_item_id FK
+        uuid requested_by_user_id FK
+        string purpose
+        string status
+        timestamp start_date
+        timestamp end_date
+    }
+
+    FORENSIC_LAB_REPORTS {
+        uuid id PK
+        uuid reservation_id FK
+        uuid analyst_id FK
+        string forensic_tool_name
+        string tool_version
+        string integrity_status
+        text findings
+    }
+
+    CHAIN_OF_CUSTODY_LOGS {
+        uuid id PK
+        uuid evidence_item_id FK
+        uuid actor_user_id FK
+        string action_type
+        boolean tamper_flag
+        timestamp recorded_at
+    }
+```
+
 ---
 
 ## 5. Caching and Interactive API Documentation
@@ -165,9 +277,9 @@ To reduce database query load for frequently requested, slow changing entities, 
 
 ### Interactive OpenAPI / Swagger UI
 Every service includes `springdoc-openapi-starter-webmvc-ui` (v2.6.0). Documentation is accessible directly via the API Gateway or individual service ports:
-* **Auth Service Docs:** `http://54.162.223.159:8081/swagger-ui/index.html`
-* **Case and Evidence Docs:** `http://54.162.223.159:8082/swagger-ui/index.html`
-* **Forensic Vault Docs:** `http://54.162.223.159:8083/swagger-ui/index.html`
+* **Auth Service Docs:** `http://98.91.232.127:8081/swagger-ui/index.html`
+* **Case and Evidence Docs:** `http://98.91.232.127:8082/swagger-ui/index.html`
+* **Forensic Vault Docs:** `http://98.91.232.127:8083/swagger-ui/index.html`
 
 ---
 
@@ -201,7 +313,7 @@ The live production system is hosted on Amazon Web Services in region `us-east-1
 * **AWS RDS (PostgreSQL 16):** Database identifier `veritasvault-db.ckf0yi44iig0.us-east-1.rds.amazonaws.com`.
   * Secured via Security Group Chaining (`sg-02c010939a6dc9258`) restricted to traffic originating from the EC2 security group (`sg-09179e300ebb6bed3`).
 * **AWS EC2 (Ubuntu 24.04 LTS):** Instance identifier `i-0058f806ef1591c17` (`t3.medium`).
-  * Public IP: `54.162.223.159`
+  * Public IP: `98.91.232.127`
   * Attached IAM Role: `EC2-ECR-Role` with `AmazonEC2ContainerRegistryPowerUser` policy.
 * **AWS ECR (Elastic Container Registry):** 5 private container repositories under account `411711548396`:
   1. `411711548396.dkr.ecr.us-east-1.amazonaws.com/veritas-auth-service`
@@ -212,8 +324,8 @@ The live production system is hosted on Amazon Web Services in region `us-east-1
   * Tagged with semantic version `1.0.0` and `latest`.
 
 ### Live Production Web Application
-* **Frontend Web Application:** [http://54.162.223.159:5173](http://54.162.223.159:5173)
-* **API Gateway Route:** [http://54.162.223.159:8080/api](http://54.162.223.159:8080/api)
+* **Frontend Web Application:** [http://98.91.232.127:5173](http://98.91.232.127:5173)
+* **API Gateway Route:** [http://98.91.232.127:8080/api](http://98.91.232.127:8080/api)
 
 ---
 

@@ -10,7 +10,7 @@ pipeline {
         AWS_REGION         = 'us-east-1'
         AWS_ACCOUNT_ID     = '411711548396'
         ECR_REGISTRY       = '411711548396.dkr.ecr.us-east-1.amazonaws.com'
-        EC2_PUBLIC_IP      = '54.162.223.159'
+        EC2_PUBLIC_IP      = '98.91.232.127'
         VERSION_TAG        = '1.0.0'
         IMAGE_AUTH         = "${ECR_REGISTRY}/veritas-auth-service"
         IMAGE_CASE         = "${ECR_REGISTRY}/veritas-case-evidence-service"
